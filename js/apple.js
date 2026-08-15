@@ -6,8 +6,10 @@ let headers = {
 async function init(cfg) {}
 
 function getList(data) {
+    if (!Array.isArray(data)) return [];
     let videos = [];
     data.forEach(vod => {
+        if (!vod) return;
         let r = vod.updateInfo ? "更新至" + vod.updateInfo : "";
         videos.push({
             "vod_id": vod.id.toString(),
@@ -21,7 +23,15 @@ function getList(data) {
 
 // ------------------- 兼容 JSON -------------------
 function parseResp(resp) {
-    return typeof resp.content === "string" ? JSON.parse(resp.content) : resp.content;
+    let content = resp && typeof resp === 'object' && Object.prototype.hasOwnProperty.call(resp, 'content') ? resp.content : resp;
+    if (typeof content === "string") {
+        try {
+            return JSON.parse(content);
+        } catch (e) {
+            return null;
+        }
+    }
+    return content || null;
 }
 
 async function home(filter) {
@@ -33,6 +43,8 @@ async function home(filter) {
     let demos = ['时间', '人气', '评分'];
     let classes = [];
     let filters = {};
+
+    if (!data || !Array.isArray(data.data)) return JSON.stringify({ class: classes, filters: filters });
 
     data.data.forEach(item => {
         let typeId = item.type_id.toString();
@@ -63,45 +75,54 @@ async function homeVod() {
     let data = parseResp(resp);
 
     let videos = [];
-    data.data.list.forEach(i => { videos = videos.concat(getList(i.list)); });
+    if (!data || !data.data || !Array.isArray(data.data.list)) return JSON.stringify({ list: videos });
+    data.data.list.forEach(i => {
+        if (i && Array.isArray(i.list)) videos = videos.concat(getList(i.list));
+    });
     return JSON.stringify({ list: videos });
 }
 
 async function category(tid, pg, filter, extend) {
+    extend = extend || {};
+    let page = parseInt(pg, 10) || 1;
     let params = { 
-        "page": pg, 
+        "page": page, 
         "type": tid, 
         "area": extend.areaes || '', 
-        "year": extend.yeares || '', 
-        "sortby": extend.sortby || '', 
-        "class": extend.classes || '' 
+        "year": extend.yeares || '',
+        "sortby": extend.sortby || '',
+        "class": extend.classes || ''
     };
     let query = Object.keys(params).filter(k => params[k] !== '').map(k => k + '=' + encodeURIComponent(params[k])).join('&');
     let url = host + '/api.php/v2.vod/androidfilter10086?' + query;
     let resp = await req(url, { headers: headers });
     let data = parseResp(resp);
 
-    return JSON.stringify({ list: getList(data.data), page: parseInt(pg), pagecount: 9999, limit: 90, total: 999999 });
+    return JSON.stringify({ list: getList(data && data.data), page: page, pagecount: 9999, limit: 90, total: 999999 });
 }
 
 async function detail(id) {
     let url = host + '/api.php/v3.vod/androiddetail2?vod_id=' + id;
     let resp = await req(url, { headers: headers });
-    let data = parseResp(resp).data;
+    let data = parseResp(resp);
+    data = data && data.data;
+    if (!data || !Array.isArray(data.urls)) return JSON.stringify({ list: [] });
 
     // 过滤掉包含“及时雨”的选集
-    let filteredUrls = data.urls.filter(i => !i.key.includes("及时雨"));
-    let playlist = filteredUrls.map(i => i.key + '$' + i.url).join('#');
+    let filteredUrls = data.urls.filter(i => i && i.url && !String(i.key || '').includes("及时雨"));
+    let playlist = filteredUrls.map(i => String(i.key) + '$' + i.url).join('#');
 
     let vod = {
         'vod_id': id,
         'vod_name': data.name,
+        'vod_pic': data.pic,
         'vod_year': data.year,
         'vod_area': data.area,
         'vod_lang': data.lang,
         'type_name': data.className,
         'vod_actor': data.actor,
         'vod_director': data.director,
+        'vod_remarks': data.updateInfo ? "更新至" + data.updateInfo : (data.score ? data.score.toString() : ""),
         'vod_content': data.content,
         'vod_play_from': '书生精选线路', 
         'vod_play_url': playlist
@@ -111,19 +132,16 @@ async function detail(id) {
 }
 
 async function search(wd, quick, pg) {
-    let page = pg || '1';
+    let page = parseInt(pg, 10) || 1;
     let url = host + '/api.php/v2.vod/androidsearch10086?page=' + page + '&wd=' + encodeURIComponent(wd);
     let resp = await req(url, { headers: headers });
     let data = parseResp(resp);
 
-    return JSON.stringify({ list: getList(data.data), page: page });
+    return JSON.stringify({ list: getList(data && data.data), page: page });
 }
 
 async function play(flag, id, flags) {
-    let playUrl = id;
-    if (!id.startsWith('http')) {
-        playUrl = "http://c.xpgtv.net/m3u8/" + id + ".m3u8";
-    }
+    let playUrl = typeof id === 'string' && id.startsWith('http') ? id : "http://c.xpgtv.net/m3u8/" + String(id || '').trim() + ".m3u8";
 
     const playHeader = {
         'user_id': 'XPGBOX',

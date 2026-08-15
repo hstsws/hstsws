@@ -6,7 +6,7 @@ from base.spider import Spider
 
 class Spider(Spider):
 	def getName(self): return "骚火电影"
-
+# 最新备用域名：https://shdy2.com，请及时收藏网址发布页 http://shapp.us
 	def init(self, extend=""):
 		self.host = "https://shdy5.us"
 		self.headers = {"User-Agent": "Mozilla/5.0", "Accept-Language": "zh-CN,zh;q=0.9", "Referer": "https://www.baidu.com/"}
