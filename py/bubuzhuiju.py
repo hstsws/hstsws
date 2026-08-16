@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 # ============================================================
 #  遮天九秘 · TVBox爬虫脚本（自动生成）
-#  目标站: https://c453sddsc451azx.top（布布追剧）
+#  目标站: 布布追剧 API（原站已迁移，接入多多追剧线路合集，见 SITE_HOSTS）
 #  注入九秘: 临, 兵, 斗, 者, 皆, 阵, 前
 #  解码: 纯Python重建WASM签名（SHA-256 of finger/.../v=1）
 # ============================================================
 import sys, re, json, base64, html as html_module, os, threading, time, hashlib
-from urllib.parse import quote, unquote, urljoin
+from urllib.parse import quote, unquote, urljoin, urlparse
 try:
     from base.spider import Spider as BaseSpider
 except ImportError:
@@ -25,8 +25,14 @@ DECODE_SK = "WEB-50a8e9c84a1dc05669a692ded99a2dac46527229e607a7be15db88dbc59059d
 API_HEADERS = {
     "Accept": "application/json",
     "X-Client": "8f3d2a1c7b6e5d4c9a0b1f2e3d4c5b6a",
-    "web-sign": "f65f3a83d6d9ad6f",
+    "web-sign": "ddtvf65f3a83d6d9ad6f",
 }
+SITE_HOSTS = [
+    "https://323433ssdfd.top",
+    "https://duoduosdf12223234334.top",
+    "https://xds2435u23422342342u.top",
+    "https://dduotv01.top",
+]
 FALLBACK_CLASSES = [
     {"type_id": "1", "type_name": "电影"},
     {"type_id": "2", "type_name": "剧集"},
@@ -39,11 +45,14 @@ CATE_NAME = {"1": "电影", "2": "剧集", "3": "动漫", "4": "综艺"}
 class Spider(BaseSpider):
     def __init__(self):
         super().__init__()
-        self.host = "https://c453sddsc451azx.top"
+        self.host = SITE_HOSTS[0]
+        self.hosts = list(SITE_HOSTS)
         self.headers = dict(API_HEADERS)
         self.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
-        self.session = requests.Session()
-        self.session.headers.update(self.headers)
+        self.session = None
+        if requests is not None and hasattr(requests, "Session"):
+            self.session = requests.Session()
+            self.session.headers.update(self.headers)
         self.cache = {}
 
     # ---------- 基础 ----------
@@ -59,10 +68,34 @@ class Spider(BaseSpider):
     def manualVideoCheck(self):
         return False
 
+    def destroy(self):
+        pass
+
+    def localProxy(self, param):
+        return None
+
     # ---------- 请求辅助 ----------
     def _get_json(self, path, params=None):
-        r = self.session.get(self.host + path, params=params, timeout=15)
-        return r.json()
+        last = None
+        for h in self.hosts:
+            try:
+                if self.session is not None:
+                    r = self.session.get(h + path, params=params, timeout=15)
+                elif requests is not None and hasattr(requests, "get"):
+                    r = requests.get(h + path, params=params,
+                                     headers=self.headers, timeout=15)
+                else:
+                    raise RuntimeError("requests 库不可用，无法请求")
+                if r.status_code != 200:
+                    raise RuntimeError("http-status-%d" % r.status_code)
+                d = r.json()
+                if not isinstance(d, dict):
+                    raise RuntimeError("bad-json")
+                self.host = h
+                return d
+            except Exception as e:
+                last = e
+        raise last if last else RuntimeError("no-host")
 
     def _clean_title(self, raw):
         if not raw:
@@ -82,6 +115,17 @@ class Spider(BaseSpider):
         return url
 
     # ---------- 解码 ----------
+    def _ref_host(self, url):
+        """从播放链接中提取 scheme://host 作为 Referer（播放器原始 host）"""
+        try:
+            if url:
+                pr = urlparse(url)
+                if pr.scheme and pr.netloc:
+                    return f"{pr.scheme}://{pr.netloc}"
+        except Exception:
+            pass
+        return self.host
+
     @staticmethod
     def _varint(n):
         out = bytearray()
@@ -104,7 +148,7 @@ class Spider(BaseSpider):
 
     def _build_decode_request(self, url, flag, now=None, nonce_hex=None):
         if now is None:
-            now = int(time.time())
+            now = int(time.time() * 1000)  # 与站点签名校验一致：毫秒时间戳
         if nonce_hex is None:
             nonce_hex = os.urandom(16).hex()
         sign_src = ("finger=%s&id=%s&nonce=%s&sk=%s&time=%d&v=1"
@@ -160,19 +204,44 @@ class Spider(BaseSpider):
         if key in self.cache:
             return self.cache[key]
         body = self._build_decode_request(code, flag)
-        r = self.session.post(self.host + "/api.php/web/decode/url",
-                              data=body,
-                              headers={"Content-Type": "application/x-protobuf"},
-                              timeout=20)
-        fields = self._parse_proto(r.content)
-        if fields.get(1) != 1:
-            return ""
-        for k, v in fields.items():
-            if isinstance(v, bytes) and b"http" in v:
-                idx = v.index(b"http")
-                m3u8 = v[idx:].decode("utf-8", "replace").rstrip("\x00")
-                self.cache[key] = m3u8
-                return m3u8
+        msg = None
+        for h in self.hosts:
+            try:
+                if self.session is not None:
+                    r = self.session.post(h + "/api.php/web/decode/url",
+                                          data=body,
+                                          headers={"Content-Type": "application/x-protobuf"},
+                                          timeout=20)
+                elif requests is not None and hasattr(requests, "post"):
+                    headers = dict(self.headers)
+                    headers["Content-Type"] = "application/x-protobuf"
+                    r = requests.post(h + "/api.php/web/decode/url",
+                                      data=body, headers=headers, timeout=20)
+                else:
+                    return ""
+                if r.status_code != 200:
+                    raise RuntimeError("http-status-%d" % r.status_code)
+                fields = self._parse_proto(r.content)
+                got = False
+                for k, v in fields.items():
+                    if isinstance(v, bytes) and b"http" in v:
+                        idx = v.index(b"http")
+                        m3u8 = v[idx:].decode("utf-8", "replace").rstrip("\x00")
+                        self.host = h
+                        self.cache[key] = m3u8
+                        return m3u8
+                got = True
+                m = fields.get(2) if isinstance(fields.get(2), bytes) else None
+                if not m:
+                    m = fields.get(3) if isinstance(fields.get(3), bytes) else None
+                if m:
+                    msg = m.decode("utf-8", "replace")
+                if got:
+                    break
+            except Exception as e:
+                msg = str(e)
+        if msg:
+            print(f"[解码失败] {msg}")
         return ""
 
     # ---------- 首页 ----------
@@ -181,7 +250,7 @@ class Spider(BaseSpider):
             return self._homeContent_inner(filter)
         except Exception as e:
             print(f"[临字秘] homeContent治愈: {e}")
-            return {"class": FALLBACK_CLASSES}
+            return {"class": FALLBACK_CLASSES, "list": [], "filters": {}, "page": 1}
 
     def _homeContent_inner(self, filter):
         d = self._get_json("/api.php/web/index/home")
@@ -191,7 +260,33 @@ class Spider(BaseSpider):
             cats.append({"type_id": str(c.get("type_id")), "type_name": c.get("type_name")})
         if not cats:
             cats = FALLBACK_CLASSES
-        return {"class": cats}
+        # 从首页分类与推荐位收集视频（TVBox homeContent 规范字段）
+        videos = []
+        seen = set()
+        for c in data.get("categories") or []:
+            for it in c.get("videos") or []:
+                vid = str(it.get("vod_id"))
+                if vid in ("None", "") or vid in seen:
+                    continue
+                seen.add(vid)
+                videos.append({
+                    "vod_id": vid,
+                    "vod_name": it.get("vod_name") or "",
+                    "vod_pic": self._fix_pic(it.get("vod_pic")),
+                    "vod_remarks": it.get("vod_remarks") or "",
+                })
+        for it in data.get("recommend") or []:
+            vid = str(it.get("vod_id"))
+            if vid in ("None", "") or vid in seen:
+                continue
+            seen.add(vid)
+            videos.append({
+                "vod_id": vid,
+                "vod_name": it.get("vod_name") or "",
+                "vod_pic": self._fix_pic(it.get("vod_pic")),
+                "vod_remarks": it.get("vod_remarks") or "",
+            })
+        return {"class": cats, "list": videos, "filters": {}, "page": 1}
 
     # ---------- 分类 ----------
     def categoryContent(self, tid, pg, filter, extend):
@@ -211,7 +306,7 @@ class Spider(BaseSpider):
         videos = []
         for it in items:
             videos.append({
-                "vod_id": it.get("vod_id"),
+                "vod_id": str(it.get("vod_id")),
                 "vod_name": it.get("vod_name"),
                 "vod_pic": self._fix_pic(it.get("vod_pic")),
                 "vod_remarks": it.get("vod_remarks") or "",
@@ -230,6 +325,7 @@ class Spider(BaseSpider):
 
     def _detailContent_inner(self, ids):
         vod_id = ids[0] if ids and ids[0] else "1"
+        vod_id = str(vod_id)
         if vod_id.startswith("http"):
             m = re.search(r"/(\d+)\.html", vod_id)
             vod_id = m.group(1) if m else vod_id
@@ -266,7 +362,10 @@ class Spider(BaseSpider):
             m3u8 = self.decode_url(id, flag)
             if not m3u8:
                 return {"parse": 0, "url": id, "header": {}}
-            return {"parse": 0, "url": m3u8, "header": {"User-Agent": self.headers["User-Agent"]}}
+            hdrs = {"User-Agent": self.headers["User-Agent"]}
+            if m3u8.startswith("http"):
+                hdrs["Referer"] = self._ref_host(m3u8)
+            return {"parse": 0, "url": m3u8, "header": hdrs}
         except Exception as e:
             print(f"[斗字秘] playerContent治愈: {e}")
             return {"parse": 0, "url": id, "header": {}}
@@ -279,12 +378,12 @@ class Spider(BaseSpider):
             videos = []
             for it in items:
                 videos.append({
-                    "vod_id": it.get("vod_id"),
-                    "vod_name": it.get("vod_name"),
+                    "vod_id": str(it.get("vod_id")),
+                    "vod_name": it.get("vod_name") or "",
                     "vod_pic": self._fix_pic(it.get("vod_pic")),
                     "vod_remarks": it.get("vod_remarks") or "",
                 })
-            return {"list": videos, "page": int(pg), "pagecount": 1}
+            return {"list": videos, "page": int(pg) if str(pg).isdigit() else 1, "pagecount": 1}
         except Exception as e:
             print(f"[皆字秘] searchContent治愈: {e}")
             return {"list": [], "page": 1}
@@ -307,6 +406,17 @@ class Spider(BaseSpider):
                         "vod_pic": self._fix_pic(it.get("vod_pic")),
                         "vod_remarks": it.get("vod_remarks") or "",
                     })
+            for it in data.get("recommend") or []:
+                vid = it.get("vod_id")
+                if vid in seen:
+                    continue
+                seen.add(vid)
+                videos.append({
+                    "vod_id": vid,
+                    "vod_name": it.get("vod_name") or "",
+                    "vod_pic": self._fix_pic(it.get("vod_pic")),
+                    "vod_remarks": it.get("vod_remarks") or "",
+                })
             return {"list": videos, "page": 1}
         except Exception as e:
             print(f"[前字秘] homeVideoContent治愈: {e}")
