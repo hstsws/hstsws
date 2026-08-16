@@ -28,6 +28,15 @@
    "api": "./js/金牌影院.js"
   },
   {
+   "key": "py_libvio",
+   "name": "LIBVIO[py]",
+   "type": 3,
+   "api": "./py/libvio.py",
+   "searchable": 1,
+   "quickSearch": 1,
+   "filterable": 1
+  },
+  {
    "key": "聚合短剧",
    "name": "聚合短剧[js]",
    "type": 3,
