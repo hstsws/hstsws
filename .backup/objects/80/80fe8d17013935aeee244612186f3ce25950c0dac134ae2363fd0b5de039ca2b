@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""验证码二值化 + 列投影分析：判断字符是否等宽/位置固定（模板匹配可行性）"""
+import io, glob, re
+from PIL import Image
+
+
+def analyze(p):
+    img = Image.open(p).convert('L')
+    w, h = img.size
+    # 二值化：取暗像素为前景
+    px = img.load()
+    rows = []
+    for y in range(h):
+        row = ''
+        for x in range(w):
+            row += '0' if px[x, y] < 100 else '1'
+        rows.append(row)
+    # 列投影
+    colsum = [sum(1 for y in range(h) if rows[y][x] == '0') for x in range(w)]
+    # 找字符区间
+    intervals = []
+    x = 0
+    while x < w:
+        if colsum[x] > 0:
+            start = x
+            while x < w and colsum[x] > 0:
+                x += 1
+            intervals.append((start, x - 1))
+        else:
+            x += 1
+    print('%-10s w=%d intervals=%s' % (p.split('/')[-1], w, intervals))
+    return intervals
+
+
+print('=== 所有样本的字符区间 ===')
+all_widths = []
+for p in sorted(glob.glob('/tmp/vcodes/*.jpg')):
+    iv = analyze(p)
+    all_widths.append([b - a + 1 for a, b in iv])
+print('\n字符宽度集合:', sorted(set(w for l in all_widths for w in l)))

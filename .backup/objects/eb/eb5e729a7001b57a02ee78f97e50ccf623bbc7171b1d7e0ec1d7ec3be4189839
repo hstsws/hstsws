@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""放大验证码图片，多方式OCR确认算式格式"""
+import io
+from PIL import Image
+import ddddocr
+
+ocr = ddddocr.DdddOcr(show_ad=False)
+
+for i in range(3):
+    p = '/tmp/vcode_%d.jpg' % i
+    try:
+        img = Image.open(p)
+    except Exception as e:
+        print(i, 'open err', e)
+        continue
+    print('img%d size=%s mode=%s' % (i, img.size, img.mode))
+    # 放大3x
+    big = img.resize((img.width * 4, img.height * 4), Image.LANCZOS)
+    big = big.convert('L')
+    # 二值化
+    bw = big.point(lambda x: 0 if x < 140 else 255)
+    buf = io.BytesIO()
+    bw.save(buf, format='PNG')
+    r1 = ocr.classification(buf.getvalue())
+    print('  ocr(放大+二值):', repr(r1))
+    # 原图直接识别
+    buf2 = io.BytesIO()
+    img.save(buf2, format='PNG')
+    print('  ocr(原图):', repr(ocr.classification(buf2.getvalue())))
+    # 彩色放大
+    buf3 = io.BytesIO()
+    big_color = img.resize((img.width * 4, img.height * 4), Image.LANCZOS)
+    big_color.save(buf3, format='PNG')
+    print('  ocr(彩色放大):', repr(ocr.classification(buf3.getvalue())))

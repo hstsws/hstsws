@@ -28,6 +28,18 @@
    "api": "./js/金牌影院.js"
   },
   {
+   "key": "py_maple",
+   "name": "枫叶[py]",
+   "type": 3,
+   "api": "./py/maple.py",
+   "searchable": 1,
+   "quickSearch": 1,
+   "filterable": 1,
+   "ext": {
+    "host": "https://www.cd-zj.com"
+   }
+  },
+  {
    "key": "py_libvio",
    "name": "LIBVIO[py]",
    "type": 3,

@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""模拟 xlys._parse_list 解析搜索结果页，检查是否正常"""
+import re, sys
+sys.path.insert(0, '/storage/emulated/0/box/py')
+
+# 直接复用 xlys.py 的解析逻辑（去掉 requests 依赖，用本地文件）
+from lxml import etree
+
+ITEM_RE = re.compile(r'^/([A-Za-z0-9]+)/(\d+)\.htm$')
+
+
+def _tree(html):
+    parser = etree.HTMLParser(encoding="utf-8", recover=True)
+    return etree.fromstring(html.encode("utf-8", errors="replace"), parser)
+
+
+def parse_list(html):
+    tree = _tree(html)
+    groups = {}
+    for a in tree.xpath('//a[@href]'):
+        href = a.get("href", "")
+        m = ITEM_RE.match(href.split("?")[0].split("#")[0])
+        if not m:
+            continue
+        groups.setdefault((m.group(1), m.group(2)), []).append(a)
+    results = []
+    for (genre, vid), anchors in groups.items():
+        name, pic, note = "", "", ""
+        for a in anchors:
+            if not name:
+                h4 = "".join(a.xpath('.//h4//text()')).strip()
+                if h4:
+                    name = h4
+            if not pic:
+                for at in ("data-original", "data-src", "src"):
+                    v = a.xpath('.//img/@%s' % at)
+                    if v and v[0].strip():
+                        pic = v[0]
+                        break
+            if not note:
+                note = "".join(a.xpath('.//span//text() | .//em//text()')).strip()
+        if not name:
+            for a in anchors:
+                cand = (a.xpath('./following-sibling::h4[1]//text()')
+                        or a.xpath('./preceding-sibling::h4[1]//text()')
+                        or a.xpath('../h4//text()')
+                        or a.xpath('../following-sibling::h4[1]//text()')
+                        or a.xpath('../preceding-sibling::h4[1]//text()'))
+                if cand:
+                    name = "".join(cand).strip()
+                    break
+        if not name:
+            for a in anchors:
+                if a.get("title"):
+                    name = a.get("title").strip()
+                    break
+        if not name:
+            continue
+        if not pic:
+            pic = ""
+        results.append({"vod_id": "%s/%s" % (genre, vid), "vod_name": name,
+                         "vod_pic": pic, "vod_remarks": note})
+    return results
+
+
+for f in ['search_ll.html', 'search_hlbt.html', 'search_dmkj.html']:
+    html = open('/storage/emulated/0/box/py/tests/%s' % f, encoding='utf-8').read()
+    res = parse_list(html)
+    print('=== %s: %d results ===' % (f, len(res)))
+    for r in res[:5]:
+        print('  ', r['vod_id'], '|', r['vod_name'][:50], '|', r['vod_pic'][:60], '|', r['vod_remarks'][:20])

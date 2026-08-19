@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""ddddocr 识别验证码 + 提交 ?code= 测试完整流程"""
+import urllib.request, urllib.parse, http.cookiejar, re, ssl, time
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+import ddddocr
+ocr = ddddocr.DdddOcr(show_ad=False)
+
+cj = http.cookiejar.CookieJar()
+op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+op.addheaders = [('User-Agent', UA), ('Referer', 'https://v.xl.in.ua/')]
+
+kw = '流浪地球'
+kwq = urllib.parse.quote(kw)
+
+op.open('https://v.xl.in.ua/', timeout=25)
+
+for attempt in range(6):
+    r = op.open('https://v.xl.in.ua/search/' + kwq, timeout=25)
+    b = r.read().decode('utf-8', 'ignore')
+    m = re.search(r'/search/verifyCode\?t=\d+', b)
+    if not m:
+        links = re.findall(r'href="(/[A-Za-z0-9]+/\d+\.htm)"', b)
+        print('attempt %d: NO captcha! links=%s' % (attempt, links[:5]))
+        open('/tmp/search_ok.html', 'w').write(b)
+        break
+    r2 = op.open('https://v.xl.in.ua' + m.group(0), timeout=25)
+    img = r2.read()
+    code = ocr.classification(img)
+    print('attempt %d: ocr=%r' % (attempt, code))
+    if not code or not re.fullmatch(r'[0-9a-zA-Z]{4,6}', code):
+        print('  bad ocr result, retry')
+        continue
+    r3 = op.open('https://v.xl.in.ua/search/' + kwq + '?code=' + urllib.parse.quote(code), timeout=25)
+    b3 = r3.read().decode('utf-8', 'ignore')
+    links3 = re.findall(r'href="(/[A-Za-z0-9]+/\d+\.htm)"', b3)
+    print('  submit result: captcha=%s links=%s title=%s' % (
+        '验证码' in b3, links3[:3], re.search(r'<title>([^<]*)</title>', b3).group(1) if re.search(r'<title>([^<]*)</title>', b3) else ''))
+    if links3 and not '验证码' in b3:
+        open('/tmp/search_ok.html', 'w').write(b3)
+        print('SUCCESS!')
+        break
+    re.search(r'错误|正确|失败|成功|valid|error', b3, re.I) and print('  msg:', re.search(r'(错误|正确|失败|成功)[^<]{0,40}', b3).group(0) if re.search(r'(错误|正确|失败|成功)[^<]{0,40}', b3) else '')
+    time.sleep(1)

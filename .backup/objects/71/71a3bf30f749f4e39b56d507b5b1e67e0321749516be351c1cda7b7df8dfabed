@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""1) 验证同一 session 二次搜索是否免验证 2) 探测 JSON API"""
+import urllib.request, urllib.parse, http.cookiejar, re, ssl, time, io
+from PIL import Image
+import ddddocr
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+ocr = ddddocr.DdddOcr(show_ad=False)
+
+
+def parse_expr(s):
+    s = s.replace('x', '*').replace('X', '*').replace('×', '*').replace('z', '2').replace('s', '5')
+    m = re.search(r'(\d{1,4})\s*([+\-*])\s*(\d{1,4})', s)
+    return (int(m.group(1)), m.group(2), int(m.group(3))) if m else None
+
+
+def compute(e):
+    a, op, b = e
+    return {'+': a + b, '-': a - b, '*': a * b}[op]
+
+
+def preprocess(img_bytes):
+    img = Image.open(io.BytesIO(img_bytes)).convert('L')
+    big = img.resize((img.width * 4, img.height * 4), Image.LANCZOS)
+    bw = big.point(lambda x: 0 if x < 150 else 255)
+    buf = io.BytesIO(); bw.save(buf, format='PNG')
+    return buf.getvalue()
+
+
+def solve_captcha(op, page_html):
+    m = re.search(r'/search/verifyCode\?t=\d+', page_html)
+    if not m:
+        return True
+    for _ in range(8):
+        img = op.open('https://v.xl.in.ua' + m.group(0), timeout=25).read()
+        for prep in (lambda x: x, preprocess):
+            text = ocr.classification(prep(img))
+            e = parse_expr(text)
+            if not e:
+                continue
+            ans = compute(e)
+            r = op.open('https://v.xl.in.ua' + re.search(r'(?:https?://[^/]+)?(/search/[^?]+)', page_html).group(1) + '?code=' + str(ans), timeout=25)
+            b = r.read().decode('utf-8', 'ignore')
+            links = re.findall(r'href="(/[A-Za-z0-9]+/\d+\.htm)"', b)
+            if links and '验证码' not in b:
+                print('  solve ok: ocr=%r ans=%s' % (text, ans))
+                return b
+    return False
+
+
+cj = http.cookiejar.CookieJar()
+op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+op.addheaders = [('User-Agent', UA), ('Referer', 'https://v.xl.in.ua/')]
+op.open('https://v.xl.in.ua/', timeout=25)
+
+kwq = urllib.parse.quote('流浪地球')
+search_url = 'https://v.xl.in.ua/search/' + kwq
+
+# --- 1. 首次搜索（需验证码）---
+r = op.open(search_url, timeout=25)
+b = r.read().decode('utf-8', 'ignore')
+print('first search: captcha=%s' % ('验证码' in b), 'cookies:', [(c.name) for c in cj])
+result = solve_captcha(op, b)
+print('solve result:', 'OK' if isinstance(result, str) else 'FAIL', 'cookies now:', [(c.name, c.value[:20]) for c in cj])
+
+if isinstance(result, str):
+    # --- 2. 同一 session 二次搜索（同关键词）---
+    r2 = op.open(search_url, timeout=25)
+    b2 = r2.read().decode('utf-8', 'ignore')
+    print('second search same kw: captcha=%s links=%s' % ('验证码' in b2, re.findall(r'href="(/[A-Za-z0-9]+/\d+\.htm)"', b2)[:3]))
+    # --- 3. 不同关键词 ---
+    kw2 = urllib.parse.quote('肖申克')
+    r3 = op.open('https://v.xl.in.ua/search/' + kw2, timeout=25)
+    b3 = r3.read().decode('utf-8', 'ignore')
+    print('third search diff kw: captcha=%s links=%s' % ('验证码' in b3, re.findall(r'href="(/[A-Za-z0-9]+/\d+\.htm)"', b3)[:3]))
+
+# --- 4. JSON API 探测 ---
+print('\n=== JSON API 探测 ===')
+apis = [
+    '/api.php/provide/vod/?wd=%s' % kwq,
+    '/api.php?wd=%s' % kwq,
+    '/index.php/vod/search.html?wd=%s' % kwq,
+    '/vodsearch/%s' % kwq,
+    '/searchs?wd=%s' % kwq,
+    '/ajax/search?wd=%s' % kwq,
+    '/api/search?wd=%s' % kwq,
+    '/searchApi?wd=%s' % kwq,
+    '/lines?type=search&wd=%s' % kwq,
+]
+for p in apis:
+    try:
+        r = op.open('https://v.xl.in.ua' + p, timeout=15)
+        b = r.read().decode('utf-8', 'ignore')
+        ct = r.headers.get('Content-Type', '')
+        print('%-45s -> %s len=%d ct=%s head=%r' % (p, r.status, len(b), ct, b[:120].replace('\n', ' ')))
+    except Exception as e:
+        print('%-45s -> ERR %s' % (p, e))

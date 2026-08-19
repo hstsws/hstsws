@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""测试移动UA + 备用域名下的搜索行为"""
+import urllib.request, urllib.parse, http.cookiejar, re, ssl
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+
+UAS = [
+    ('desktop', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'),
+    ('android', 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'),
+    ('iphone', 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'),
+]
+HOSTS = ['https://v.xl.in.ua', 'https://v.xl01.eu.cc', 'https://v.xl02.eu.cc', 'https://v.xl01.cc.ua']
+
+kw = urllib.parse.quote('流浪地球')
+
+for host in HOSTS:
+    print('=' * 10, host)
+    for uaname, ua in UAS:
+        cj = http.cookiejar.CookieJar()
+        op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+        op.addheaders = [('User-Agent', ua), ('Referer', host + '/')]
+        try:
+            op.open(host + '/', timeout=20)
+            r = op.open(host + '/search/' + kw, timeout=20)
+            b = r.read().decode('utf-8', 'ignore')
+            m = re.search(r'<title>([^<]*)</title>', b)
+            links = re.findall(r'href="(/[A-Za-z0-9]+/\d+\.htm)"', b)
+            print('  %-8s st=%s len=%s title=%r links=%s captcha=%s cookies=%s' % (
+                uaname, r.status, len(b), m.group(1) if m else '', links[:3],
+                '验证码' in b, [(c.name) for c in cj]))
+        except Exception as e:
+            print('  %-8s ERR %s' % (uaname, e))

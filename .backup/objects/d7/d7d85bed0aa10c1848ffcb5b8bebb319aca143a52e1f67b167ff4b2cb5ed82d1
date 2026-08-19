@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""抓搜索结果页并转存，检查列表项结构"""
+import urllib.request, urllib.parse, http.cookiejar, re, ssl, time, io
+from PIL import Image
+import ddddocr
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+ocr = ddddocr.DdddOcr(show_ad=False)
+
+
+def parse_expr(s):
+    s = s.replace('x', '*').replace('X', '*').replace('×', '*').replace('z', '2').replace('s', '5').replace('o', '0').replace('O', '0')
+    m = re.search(r'(\d{1,4})\s*([+\-*])\s*(\d{1,4})', s)
+    return (int(m.group(1)), m.group(2), int(m.group(3))) if m else None
+
+
+cj = http.cookiejar.CookieJar()
+op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+op.addheaders = [('User-Agent', UA), ('Referer', 'https://v.xl.in.ua/')]
+op.open('https://v.xl.in.ua/', timeout=20)
+
+for kw, label in [('流浪地球', 'll'), ('哈利波特', 'hlbt'), ('盗梦空间', 'dmkj')]:
+    kwq = urllib.parse.quote(kw)
+    surl = 'https://v.xl.in.ua/search/' + kwq
+    b = op.open(surl, timeout=20).read().decode('utf-8', 'ignore')
+    if '验证码' in b:
+        m = re.search(r'/search/verifyCode\?t=\d+', b)
+        for _ in range(15):
+            img = op.open('https://v.xl.in.ua' + m.group(0), timeout=20).read()
+            t = ocr.classification(img)
+            e = parse_expr(t)
+            if not e:
+                continue
+            ans = {'+': e[0] + e[2], '-': e[0] - e[2], '*': e[0] * e[2]}[e[1]]
+            b3 = op.open(surl + '?code=' + str(ans), timeout=20).read().decode('utf-8', 'ignore')
+            if '验证码' not in b3:
+                b = b3
+                print('[%s] captcha solved: %r -> %s' % (label, t, ans))
+                break
+    open('/storage/emulated/0/box/py/tests/search_%s.html' % label, 'w').write(b)
+    print('[%s] len=%d captcha=%s' % (label, len(b), '验证码' in b))
+    # 链接样本
+    links = re.findall(r'href="(/[A-Za-z0-9]+/\d+\.htm)"', b)
+    titles = re.findall(r'<a[^>]+href="(/[A-Za-z0-9]+/\d+\.htm)"[^>]*>\s*(?:<[^>]+>)*\s*([^<]{2,40})', b)
+    print('   links:', links[:6])
+    print('   title samples:', titles[:6])
+    # 检查列表容器
+    cont = re.findall(r'<div[^>]*class="([^"]*(?:grid|list|video|card|item|movie)[^"]*)"', b)
+    print('   containers:', sorted(set(cont))[:10])
+    time.sleep(1)

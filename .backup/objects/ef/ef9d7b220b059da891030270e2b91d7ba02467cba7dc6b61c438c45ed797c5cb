@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""检查验证码图片结构，并测试提交逻辑"""
+import urllib.request, urllib.parse, http.cookiejar, re, ssl, struct
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+
+def jpeg_dims(data):
+    # 遍历 SOF 段
+    i = 2
+    while i < len(data) - 9:
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        marker = data[i+1]
+        if marker in (0xC0, 0xC1, 0xC2, 0xC3):
+            h, w = struct.unpack('>HH', data[i+5:i+9])
+            return w, h
+        if marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7:
+            i += 2
+            continue
+        ln = struct.unpack('>H', data[i+2:i+4])[0]
+        i += 2 + ln
+    return None
+
+
+cj = http.cookiejar.CookieJar()
+op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+op.addheaders = [('User-Agent', UA), ('Referer', 'https://v.xl.in.ua/')]
+
+# 1. 获取搜索页，抓验证码
+kw = urllib.parse.quote('流浪地球')
+op.open('https://v.xl.in.ua/', timeout=25)
+r = op.open('https://v.xl.in.ua/search/' + kw, timeout=25)
+b = r.read().decode('utf-8', 'ignore')
+m = re.search(r'/search/verifyCode\?t=\d+', b)
+print('verify path:', m.group(0) if m else None)
+
+# 2. 下载验证码（两次，对比是否变化）
+imgs = []
+for i in range(3):
+    r2 = op.open('https://v.xl.in.ua' + (m.group(0) if m else '/search/verifyCode?t=%d' % (i+1)), timeout=25)
+    img = r2.read()
+    open('/tmp/vcode_%d.jpg' % i, 'wb').write(img)
+    dims = jpeg_dims(img)
+    print('img%d size=%d dims=%s content-type=%s' % (i, len(img), dims, r2.headers.get('Content-Type')))
+    imgs.append(img)
+print('imgs identical:', imgs[0] == imgs[1], imgs[1] == imgs[2])
+
+# 3. 尝试 fetch 验证码对应 session 的校验接口：POST /search/verify
+# 先猜测提交方式：?code=xxx 直接 GET 搜索页
+r3 = op.open('https://v.xl.in.ua/search/' + kw + '?code=1234', timeout=25)
+b3 = r3.read().decode('utf-8', 'ignore')
+print('after ?code=1234: captcha=%s links=%s' % ('验证码' in b3, re.findall(r'href="(/[A-Za-z0-9]+/\d+\.htm)"', b3)[:3]))
+
+# 4. 再次直接搜索（不提交 code），30分钟窗口是否会重复要求
+r4 = op.open('https://v.xl.in.ua/search/' + kw, timeout=25)
+b4 = r4.read().decode('utf-8', 'ignore')
+print('re-search: captcha=%s' % ('验证码' in b4))

@@ -1,6 +1,6 @@
 ###### ⚠️ **重要提示**：使用前请务必阅读 [免责声明](DISCLAIMER.md)
 
-#### 群组里有 Github 通知 [频道](https://t.me/clun_tz) / [群组](https://t.me/clun_top)
+#### [频道](https://t.me/clun_tz) / 欢迎 Star 及 PR 共同改进
 
 <details>
 <summary>贡献指南</summary>
@@ -41,6 +41,11 @@
 https://clun.top/box.json
 ```
 
+###### TVBox 张佬 接口
+```
+https://clun.top/aa.json
+```
+
 ###### TVBox PG 接口
 ```
 https://clun.top/jsm.json
@@ -51,31 +56,18 @@ https://clun.top/jsm.json
 https://clun.top/fun.json
 ```
 
-###### TVBox 张佬 接口
-```
-https://clun.top/aa.json
-```
-```
-https://clun.top/bb.json
-```
-
-###### TVBox OK 接口
-```
-https://clun.top/ok.json
-```
-
 </details>
 
 <details>
 <summary>TVBox APP 下载</summary>
 
-###### FongMi leanback [v7a](https://gh.clun.top/raw.githubusercontent.com/FongMi/Release/refs/heads/fongmi/apk/release/leanback-armeabi_v7a.apk) [v8a](https://gh.clun.top/raw.githubusercontent.com/FongMi/Release/refs/heads/fongmi/apk/release/leanback-arm64_v8a.apk)
+###### FongMi leanback [v7a](https://raw.githubusercontent.com/FongMi/Release/refs/heads/fongmi/apk/release/leanback-armeabi_v7a.apk) [v8a](https://raw.githubusercontent.com/FongMi/Release/refs/heads/fongmi/apk/release/leanback-arm64_v8a.apk)
 
-###### okjack leanback [v7a](https://gh.clun.top/raw.githubusercontent.com/FongMi/Release/refs/heads/okjack/apk/release/leanback-armeabi_v7a.apk) [v8a](https://gh.clun.top/raw.githubusercontent.com/FongMi/Release/refs/heads/okjack/apk/release/leanback-arm64_v8a.apk)
+###### okjack leanback [v7a](https://raw.githubusercontent.com/FongMi/Release/refs/heads/okjack/apk/release/leanback-armeabi_v7a.apk) [v8a](https://raw.githubusercontent.com/FongMi/Release/refs/heads/okjack/apk/release/leanback-arm64_v8a.apk)
 
-###### FongMi mobile [v7a](https://gh.clun.top/raw.githubusercontent.com/FongMi/Release/refs/heads/fongmi/apk/release/mobile-armeabi_v7a.apk) [v8a](https://gh.clun.top/raw.githubusercontent.com/FongMi/Release/refs/heads/fongmi/apk/release/mobile-arm64_v8a.apk)
+###### FongMi mobile [v7a](https://raw.githubusercontent.com/FongMi/Release/refs/heads/fongmi/apk/release/mobile-armeabi_v7a.apk) [v8a](https://raw.githubusercontent.com/FongMi/Release/refs/heads/fongmi/apk/release/mobile-arm64_v8a.apk)
 
-###### okjack mobile [v7a](https://gh.clun.top/raw.githubusercontent.com/FongMi/Release/refs/heads/okjack/apk/release/mobile-armeabi_v7a.apk) [v8a](https://gh.clun.top/raw.githubusercontent.com/FongMi/Release/refs/heads/okjack/apk/release/mobile-arm64_v8a.apk)
+###### okjack mobile [v7a](https://raw.githubusercontent.com/FongMi/Release/refs/heads/okjack/apk/release/mobile-armeabi_v7a.apk) [v8a](https://raw.githubusercontent.com/FongMi/Release/refs/heads/okjack/apk/release/mobile-arm64_v8a.apk)
 
 > mobile = 手机版  
 > leanback = 电视版

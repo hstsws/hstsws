@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-# by @嗷呜
 import colorsys
+import hashlib
 import json
 import random
 import re
@@ -8,6 +8,8 @@ import sys
 import threading
 import time
 import requests
+import urllib3
+urllib3.disable_warnings()
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from pyquery import PyQuery as pq
@@ -54,7 +56,7 @@ class Spider(Spider):
         pass
 
     def homeContent(self, filter):
-        data=pq(requests.get(self.host, headers=self.headers,proxies=self.proxies).content)
+        data=pq(requests.get(self.host, headers=self.headers,proxies=self.proxies, verify=False).content)
         result = {}
         classes = []
         for k in list(data('.navbar-nav.mr-auto').children('li').items())[1:-3]:
@@ -81,7 +83,10 @@ class Spider(Spider):
             id=tid.replace('@folder','')
             videos=self.getfod(id)
         else:
-            data=pq(requests.get(f"{self.host}{tid}{pg}", headers=self.headers,proxies=self.proxies).content)
+            pg=int(pg or '1')
+            tid=str(tid).strip('/')
+            url=f"{self.host}/{tid}/" if pg==1 else f"{self.host}/{tid}/{pg}/"
+            data=pq(requests.get(url, headers=self.headers,proxies=self.proxies, verify=False).content)
             videos=self.getlist(data('#archive article a'),tid)
         result = {}
         result['list'] = videos
@@ -93,9 +98,9 @@ class Spider(Spider):
 
     def detailContent(self, ids):
         url=ids[0] if ids[0].startswith("http") else f"{self.host}{ids[0]}"
-        data=pq(requests.get(url, headers=self.headers,proxies=self.proxies).content)
+        data=pq(requests.get(url, headers=self.headers,proxies=self.proxies, verify=False).content)
         vod = {'vod_play_from': '51吸瓜'}
-        did = data('script[data-api]').attr('data-api')
+        did = data('script[data-api]').attr('data-api') or ''
         try:
             clist = []
             if data('.tags .keywords a'):
@@ -118,22 +123,24 @@ class Spider(Spider):
         return {'list':[vod]}
 
     def searchContent(self, key, quick, pg="1"):
-        data=pq(requests.get(f"{self.host}/search/{key}/{pg}", headers=self.headers,proxies=self.proxies).content)
+        data=pq(requests.get(f"{self.host}/search/{quote(key)}/", headers=self.headers,proxies=self.proxies, verify=False).content)
         return {'list':self.getlist(data('#archive article a')),'page':pg}
 
     def playerContent(self, flag, id, vipFlags):
-        did,pid=id.split('_dm_')
-        p=0 if re.search(r'\.(m3u8|mp4|flv|ts|mkv|mov|avi|webm)', pid) else 1
-        if not p:
-            pid=f"{self.getProxyUrl()}&pdid={quote(id)}&type=m3u8"
-        return  {'parse': p, 'url': pid, 'header': self.headers}
+        # id 形如: <did>_dm_<真实m3u8URL>
+        # 直接返回真实 m3u8, 避免经 9978 proxy 时
+        # TVBox M3u8Proxy 把 URL 内嵌的 &v=&time= 拆散导致 400
+        pid = id
+        if '_dm_' in id:
+            _, pid = id.split('_dm_', 1)
+        return {'parse': 0, 'url': pid, 'header': self.headers}
 
     def localProxy(self, param):
         try:
             xtype=param.get('type','')
             if 'm3u8' in xtype:
                 path,url=unquote(param['pdid']).split('_dm_')
-                data=requests.get(url, headers=self.headers,proxies=self.proxies,timeout=10).text
+                data=requests.get(url, headers=self.headers,proxies=self.proxies,timeout=10, verify=False).text
                 lines = data.strip().split('\n')
                 times=0.0
                 for i in lines:
@@ -145,7 +152,7 @@ class Spider(Spider):
                 return [200, 'text/plain', data]
             elif 'xdm' in xtype:
                 url=f"{self.host}{unquote(param['path'])}"
-                res = requests.get(url, headers=self.headers, proxies=self.proxies, timeout=10).json()
+                res = requests.get(url, headers=self.headers, proxies=self.proxies, timeout=10, verify=False).json()
                 dms=[]
                 for k in res:
                     text=k.get('text')
@@ -165,7 +172,7 @@ class Spider(Spider):
             match = re.search(r"loadBannerDirect\('([^']*)'", url)
             if match:
                 url=match.group(1)
-            res = requests.get(url, headers=self.headers, proxies=self.proxies, timeout=10)
+            res = requests.get(url, headers=self.headers, proxies=self.proxies, timeout=10, verify=False)
             return [200, res.headers.get('Content-Type'), self.aesimg(res.content)]
         except Exception as e:
             print(e)
@@ -232,26 +239,52 @@ class Spider(Spider):
             return ""
 
     def gethosts(self):
-        url=self.domin
+        """从 cg51 发布站 appConfig 解密获取线路域名列表"""
         try:
-            curl=self.getCache('host_51cn')
+            curl = self.getCache('host_51cn')
         except Exception:
-            curl=''
+            curl = ''
         if curl:
             try:
-                data=pq(requests.get(curl, headers=self.headers, proxies=self.proxies).content)('a').attr('href')
+                data = pq(requests.get(curl, headers=self.headers, proxies=self.proxies, verify=False).content)('a').attr('href')
                 if data:
                     parsed_url = urlparse(data)
-                    url = parsed_url.scheme + "://" + parsed_url.netloc
-            except:
+                    return parsed_url.scheme + "://" + parsed_url.netloc
+            except Exception:
                 pass
         try:
-            html = pq(requests.get(url, headers=self.headers, proxies=self.proxies).content)
-            html_pattern = r"Base64\.decode\('([^']+)'\)"
-            html_match = re.search(html_pattern, html('script').eq(-1).text(), re.DOTALL)
-            if not html_match:raise Exception("未找到html")
-            html = pq(b64decode(html_match.group(1)).decode())('script').eq(-4).text()
-            return self.hstr(html)
+            page = requests.get(self.domin, headers=self.headers, proxies=self.proxies, verify=False).text
+            # 有效定义: 行首非注释的 window.appConfig = {
+            m = re.search(r'(?m)^\s*window\.appConfig\s*=\s*\{', page)
+            if not m:
+                raise Exception("未找到appConfig")
+            seg = page[m.start():]
+            datas = re.findall(r'(?m)^\s*data:\s*"([^"]+)"', seg)
+            keys = re.findall(r'(?m)^\s*key:\s*"([^"]+)"', seg)
+            if not datas:
+                raise Exception("未找到appConfig.data")
+            data_b64 = datas[-1]
+            key_str = keys[-1] if keys else '0726001'
+            raw = b64decode(data_b64)
+            iv = raw[:16]
+            ct = raw[16:]
+            key = hashlib.sha256(key_str.encode()).digest()
+            cipher = AES.new(key, AES.MODE_CBC, iv)
+            text = unpad(cipher.decrypt(ct), AES.block_size).decode('utf-8')
+            cfg = json.loads(text)
+            hosts = []
+            for d in cfg.get('domain', []):
+                v = d.get('value', '')
+                if v:
+                    hosts.append(v.rstrip('/'))
+            for d in cfg.get('backup_domain', []):
+                v = d.get('value', '')
+                if v:
+                    hosts.append(v.rstrip('/'))
+            if hosts:
+                self.log(f"cg51线路: {hosts}")
+                return hosts
+            raise Exception("线路为空")
         except Exception as e:
             self.log(f"获取: {str(e)}")
             return ""
@@ -260,12 +293,18 @@ class Spider(Spider):
         try:
             if not self.host:
                 return
-            data=pq(requests.get(f"{self.host}/homeway.html", headers=self.headers,proxies=self.proxies).content)
-            url=data('.post-content[itemprop="articleBody"] blockquote p').eq(0)('a').attr('href')
-            parsed_url = urlparse(url)
-            host = parsed_url.scheme + "://" + parsed_url.netloc
-            if host:
-                self.setCache('host_51cn',host)
+            url = f"{self.host}/homeway.html"
+            data = pq(requests.get(url, headers=self.headers, proxies=self.proxies, timeout=8, verify=False).content)
+            a = data('.post-content[itemprop="articleBody"] blockquote p').eq(0)('a')
+            href = a.attr('href')
+            if href:
+                parsed_url = urlparse(href)
+                host = parsed_url.scheme + "://" + parsed_url.netloc
+                if host:
+                    try:
+                        self.setCache('host_51cn', host)
+                    except Exception:
+                        pass
         except Exception as e:
             self.log(f"getcnh: {e}")
 
@@ -345,7 +384,7 @@ class Spider(Spider):
         return domains
 
     def get_domains(self):
-        html = pq(requests.get(self.domin, headers=self.headers,proxies=self.proxies).content)
+        html = pq(requests.get(self.domin, headers=self.headers,proxies=self.proxies, verify=False).content)
         html_pattern = r"Base64\.decode\('([^']+)'\)"
         html_match = re.search(html_pattern, html('script').eq(-1).text(), re.DOTALL)
         if not html_match:
@@ -370,7 +409,7 @@ class Spider(Spider):
 
     def getfod(self, id):
         url = f"{self.host}{id}"
-        data = pq(requests.get(url, headers=self.headers, proxies=self.proxies).content)
+        data = pq(requests.get(url, headers=self.headers, proxies=self.proxies, verify=False).content)
         vdata=data('.post-content[itemprop="articleBody"]')
         r=['.txt-apps','.line','blockquote','.tags','.content-tabs']
         for i in r:vdata.remove(i)
@@ -401,12 +440,15 @@ class Spider(Spider):
 
     def host_late(self, url_list):
         if isinstance(url_list, str):
-            urls = [u.strip() for u in url_list.split(',')]
+            urls = [u.strip() for u in url_list.split(',') if u.strip()]
         else:
-            urls = url_list
+            urls = list(url_list)
+
+        if not urls:
+            return ''
 
         if len(urls) <= 1:
-            return urls[0] if urls else ''
+            return urls[0]
 
         results = {}
         threads = []
@@ -414,11 +456,15 @@ class Spider(Spider):
         def test_host(url):
             try:
                 start_time = time.time()
-                response = requests.head(url,headers=self.headers,proxies=self.proxies,timeout=1.0, allow_redirects=False)
+                # 用 GET 跟随跳转, 取最终可达域名 (线路会按路径随机跳子域)
+                response = requests.get(url, headers=self.headers, proxies=self.proxies, timeout=3.0, allow_redirects=True, verify=False)
                 delay = (time.time() - start_time) * 1000
-                results[url] = delay
+                if response.status_code == 200 and response.url:
+                    results[url] = (delay, response.url)
+                else:
+                    results[url] = (float('inf'), url)
             except Exception as e:
-                results[url] = float('inf')
+                results[url] = (float('inf'), url)
 
         for url in urls:
             t = threading.Thread(target=test_host, args=(url,))
@@ -428,7 +474,10 @@ class Spider(Spider):
         for t in threads:
             t.join()
 
-        return min(results.items(), key=lambda x: x[1])[0]
+        best = min(results.items(), key=lambda x: x[1][0])
+        final = best[1][1]
+        parsed = urlparse(final)
+        return parsed.scheme + "://" + parsed.netloc
 
     def getlist(self,data,tid=''):
         videos = []
@@ -437,7 +486,7 @@ class Spider(Spider):
             a=k.attr('href')
             b=k('h2').text()
             c=k('span[itemprop="datePublished"]').text()
-            if a and b and c:
+            if a and b and c and a.startswith('/'):
                 pic=k('script').text()
                 videos.append({
                     'vod_id': f"{a}{'@folder' if l else ''}",

@@ -372,9 +372,22 @@ class Spider(Spider):
             if re.match(r'^[\u4e00-\u9fffA-Za-z]{2,8}[:：]', l): last_label = i
         content_lines = lines[last_label + 1:] if last_label >= 0 else lines
         vod["vod_content"] = " ".join(content_lines)[:500]
-        vod["vod_play_from"] = "雪落影视"
-        vod["vod_play_url"] = self._regex_eps(vid, html)
+        vod["vod_play_from"], vod["vod_play_url"] = self._play_lines(vid, html)
         return {"list": [vod]}
+
+    def _play_lines(self, vid, html):
+        """生成多线路播放串。
+
+        本站 /lines 返回的 url3 为同一视频的多 CDN 候选（实测 3 条：byteimg/ibytedtos 等），
+        详情页注册为"线路1/线路2/线路3"，每线路集数与地址相同，
+        playerContent 依据线路名序号选对应 CDN 候选播放（越界自动回退第一条）。
+        """
+        eps = self._regex_eps(vid, html)
+        if not eps:
+            return "雪落影视", ""
+        n = 3
+        froms = "$$$".join("线路%d" % (i + 1) for i in range(n))
+        return froms, "$$$".join([eps] * n)
 
     def _regex_eps(self, vid, html):
         eps, seen = [], set()
@@ -424,17 +437,16 @@ class Spider(Spider):
                "vod_director": director, "vod_actor": actor,
                "vod_remarks": (rate_m.group(1) + "分") if rate_m else (self._field(text_flat, "集数") and ("共%s集" % self._field(text_flat, "集数"))),
                "vod_content": content}
-        vod["vod_play_from"] = "雪落影视"
-        vod["vod_play_url"] = self._regex_eps(vid, html)
+        vod["vod_play_from"], vod["vod_play_url"] = self._play_lines(vid, html)
         return {"list": [vod]}
 
-    def _lines_url(self, pid, page=""):
-        """获取取流地址：访问播放页（种 JSESSIONID 防抓取）后请求 /lines 拿 url3 直链。
+    def _lines_urls(self, pid, page=""):
+        """获取取流候选列表：访问播放页（种 JSESSIONID 防抓取）后请求 /lines 拿 url3。
 
-        播放器视角：直接传播放页 URL（如 https://v.xl.in.ua/play/3046-0.htm），
-        内部完成"访问播放页 → 取 var pid → 请求 /lines"，返回可播放的视频链接。
-        url3 逗号分隔多线路：候选 0 常为站点 obj 代理（需跟随 302 拿真实 CDN），
-        候选 1+ 为 CDN 直链（akamai/bytetos/byteimg 等，无需 cookie 直接可播）。
+        url3 逗号分隔多线路（同一视频的多 CDN 备份）：
+          候选 0 常为站点 obj 代理（需跟随 302 拿真实 CDN，过滤防盗链跳转），
+          候选 1+ 为 CDN 直链（byteimg/ibytedtos 等，无需 cookie 直接可播）。
+        返回去重后的候选列表；失败返回 []。
         """
         page = page or (self.host + "/play/%s-0.htm" % pid)
         if not page.startswith("http"): page = self._fix(page)
@@ -451,13 +463,14 @@ class Spider(Spider):
         h["Referer"] = page
         h["X-Requested-With"] = "XMLHttpRequest"
         h["Accept"] = "application/json, text/javascript, */*; q=0.01"
+        out = []
         try:
             t_ms = int(time.time() * 1000)
             sg = _xlys_sign(inner, t_ms)
             r = self.session.get("%s/lines?t=%s&sg=%s&pid=%s" % (self.host, t_ms, sg, inner), headers=h, timeout=15)
-            if r.status_code != 200: return ""
+            if r.status_code != 200: return []
             j = r.json()
-            if j.get("code") != 0: return ""
+            if j.get("code") != 0: return []
             data = j.get("data") or {}
             for cand in data.get("url3", "").split(","):
                 u = cand.strip()
@@ -474,22 +487,39 @@ class Spider(Spider):
                         rr.close()
                         if not (final and final.startswith("http")): continue
                         if any(b in final for b in ("baidu.com", "360.cn", "qq.com", "sohu.com")): continue
-                        return final
+                        u = final
                     except Exception:
                         continue
-                return u
+                if u and u not in out: out.append(u)
         except Exception as e:
             print("[ERROR] /lines 请求失败: %s" % str(e))
-        return ""
+        return out
+
+    def isVideoFormat(self, url): return ".m3u8" in url or ".mp4" in url
+    def manualVideoCheck(self): return False
+    def localProxy(self, param): return None
+    def destroy(self): return None
 
     def playerContent(self, flag, id, vipFlags):
         # 提取真实 pid：兼容 "180734" / "180734-0" / "/play/180734-0.htm" / "https://v.xl01.eu.cc/play/180734-0.htm"
         m = re.search(r'/(\d+)-\d+\.htm', id) or re.search(r'^\s*(\d+)', id)
         pid = m.group(1) if m else id
-        # 1) 优先调 /lines 接口抓 url3（播放页会发 /lines 请求，JSON 里取 url3）
+        # 线路名形如 "线路1/线路2/线路3"，解析目标候选序号
+        line_idx = 0
+        fm = re.search(r'线路(\d+)', flag or "")
+        if fm:
+            line_idx = int(fm.group(1)) - 1
+        elif str(flag).isdigit():
+            line_idx = int(flag)
+        # 1) 优先调 /lines 接口抓 url3 候选列表
         url = ""
+        cands = []
         if re.fullmatch(r'\d+', pid):
-            url = self._lines_url(pid, id if isinstance(id, str) and "play/" in id else "")
+            cands = self._lines_urls(pid, id if isinstance(id, str) and "play/" in id else "")
+            if 0 <= line_idx < len(cands):
+                url = cands[line_idx]
+            elif cands:
+                url = cands[0]
         if not url:
             page = pid if pid.startswith("http") else (self.host + "/play/" + pid + "-0.htm" if re.fullmatch(r'\d+', pid) else self._fix(pid))
             html = self._get(page) or ""
@@ -499,7 +529,11 @@ class Spider(Spider):
                 try:
                     data = json.loads(jm.group(1))
                     url3 = data.get("url3", "")
-                    url = url3.split(",")[0].strip() if url3 else ""
+                    cands = [c.strip() for c in url3.split(",") if c.strip()] if url3 else []
+                    if 0 <= line_idx < len(cands):
+                        url = cands[line_idx]
+                    elif cands:
+                        url = cands[0]
                 except Exception:
                     url = ""
             # 3) 通用正则兜底

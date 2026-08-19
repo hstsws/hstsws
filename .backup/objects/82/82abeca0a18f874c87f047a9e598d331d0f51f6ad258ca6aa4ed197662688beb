@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""批量识别采集的验证码样本，统计算式形式与识别率"""
+import os, re, io, glob
+from PIL import Image
+import ddddocr
+
+ocr = ddddocr.DdddOcr(show_ad=False)
+
+files = sorted(glob.glob('/tmp/vcodes/v*.jpg'))
+print('samples:', len(files))
+
+forms = []
+for p in files:
+    img_bytes = open(p, 'rb').read()
+    texts = []
+    try:
+        texts.append(('raw', ocr.classification(img_bytes)))
+        img = Image.open(io.BytesIO(img_bytes)).convert('L')
+        for scale in (3, 4):
+            big = img.resize((img.width * scale, img.height * scale), Image.LANCZOS)
+            for thr in (140, 170):
+                bw = big.point(lambda x, t=thr: 0 if x < t else 255)
+                buf = io.BytesIO(); bw.save(buf, format='PNG')
+                texts.append(('s%dt%d' % (scale, thr), ocr.classification(buf.getvalue())))
+    except Exception as e:
+        print(p, 'ERR', e)
+        continue
+    # 解析每个文本
+    results = []
+    for name, t in texts:
+        t2 = t.replace('x', '*').replace('X', '*').replace('×', '*').replace('z', '2').replace('s', '5').replace('o', '0').replace('O', '0').replace('I', '1').replace('l', '1')
+        m = re.search(r'(\d{1,4})\s*([+\-*])\s*(\d{1,4})', t2)
+        if m:
+            a, op, b = int(m.group(1)), m.group(2), int(m.group(3))
+            try:
+                ans = {'+': a + b, '-': a - b, '*': a * b}[op]
+                results.append((name, t, (a, op, b), ans))
+            except Exception:
+                pass
+    print('%-10s %s' % (os.path.basename(p), results if results else texts))
+    forms.extend([r[2] for r in results])
+
+print('\n--- 统计 ---')
+print('可解析样本: %d/%d' % (len(forms), len(files)))
+ops = {}
+for a, op, b in forms:
+    ops[op] = ops.get(op, 0) + 1
+print('运算符分布:', ops)
+lens = [(len(str(a)), len(str(b))) for a, op, b in forms]
+print('数字位数分布:', lens[:20])

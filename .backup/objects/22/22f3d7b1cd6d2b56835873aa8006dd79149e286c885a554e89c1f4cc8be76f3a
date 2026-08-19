@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""高重试 OCR 解验证码，成功后验证：同 session 二次搜索 / 新 session 是否免验证"""
+import urllib.request, urllib.parse, http.cookiejar, re, ssl, time, io
+from PIL import Image, ImageFilter
+import ddddocr
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+ocr = ddddocr.DdddOcr(show_ad=False)
+
+
+def preprocess_variants(img_bytes):
+    """返回多种预处理版本"""
+    out = [img_bytes]
+    try:
+        img = Image.open(io.BytesIO(img_bytes)).convert('L')
+        for scale in (3, 4, 6):
+            big = img.resize((img.width * scale, img.height * scale), Image.LANCZOS)
+            for thr in (120, 150, 180):
+                bw = big.point(lambda x, t=thr: 0 if x < t else 255)
+                buf = io.BytesIO(); bw.save(buf, format='PNG')
+                out.append(buf.getvalue())
+        # 中值滤波去 JPEG 噪声
+        denoised = img.filter(ImageFilter.MedianFilter(3))
+        big = denoised.resize((img.width * 4, img.height * 4), Image.LANCZOS)
+        bw = big.point(lambda x: 0 if x < 150 else 255)
+        buf = io.BytesIO(); bw.save(buf, format='PNG')
+        out.append(buf.getvalue())
+    except Exception:
+        pass
+    return out
+
+
+def parse_expr(s):
+    """OCR 文本 -> 算式。去掉尾部 = 后再分割，避免 '=' 粘连数字。"""
+    s = s.replace('x', '*').replace('X', '*').replace('×', '*')
+    s = s.replace('z', '2').replace('s', '5').replace('o', '0').replace('O', '0')
+    s = re.sub(r'[=?\s]+$', '', s)  # 去掉尾部 =
+    s = s.replace('=', '')  # 中间 = 也去掉（a op b = 答案? 但我们要的是算式部分）
+    m = re.search(r'(\d{1,4})\s*([+\-*])\s*(\d{1,4})', s)
+    return (int(m.group(1)), m.group(2), int(m.group(3))) if m else None
+
+
+def compute(e):
+    a, op, b = e
+    return {'+': a + b, '-': a - b, '*': a * b}[op]
+
+
+def try_solve(opener, page_html):
+    """在 page_html 中找验证码，反复尝试直到解出。返回 (结果html or False)"""
+    m = re.search(r'(?:path=)?(/search/verifyCode\?t=\d+)', page_html)
+    if not m:
+        return page_html
+    base = re.search(r'(/(?:search|search/)[^\s"\'?]*)', page_html).group(1)
+    for _ in range(25):
+        img = opener.open('https://v.xl.in.ua' + m.group(1), timeout=20).read()
+        texts = set()
+        for prep in preprocess_variants(img):
+            try:
+                texts.add(ocr.classification(prep))
+            except Exception:
+                pass
+        best = None
+        for t in texts:
+            e = parse_expr(t)
+            if e:
+                ans = compute(e)
+                if 0 <= ans <= 999999:
+                    best = (t, e, ans)
+                    break
+        if not best:
+            continue
+        t, e, ans = best
+        print('    ocr=%r expr=%s ans=%s' % (t, e, ans))
+        r = opener.open('https://v.xl.in.ua' + base + '?code=' + str(ans), timeout=20)
+        b = r.read().decode('utf-8', 'ignore')
+        if '验证码' not in b:
+            return b
+    return False
+
+
+def new_opener():
+    cj = http.cookiejar.CookieJar()
+    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    op.addheaders = [('User-Agent', UA), ('Referer', 'https://v.xl.in.ua/')]
+    op.open('https://v.xl.in.ua/', timeout=20)
+    return op
+
+
+kwq = urllib.parse.quote('流浪地球')
+surl = 'https://v.xl.in.ua/search/' + kwq
+
+# A: session A 首次搜索+解验证码
+opA = new_opener()
+r = opA.open(surl, timeout=20)
+b = r.read().decode('utf-8', 'ignore')
+print('A first search: captcha=%s' % ('验证码' in b))
+res = try_solve(opA, b)
+if isinstance(res, str):
+    links = re.findall(r'href="(/[A-Za-z0-9]+/\d+\.htm)"', res)
+    print('A solved! links=%s' % links[:5])
+    # B: 同 session 二次搜索（同词）
+    r2 = opA.open(surl, timeout=20)
+    b2 = r2.read().decode('utf-8', 'ignore')
+    print('A second search same kw: captcha=%s links=%s' % ('验证码' in b2, re.findall(r'href="(/[A-Za-z0-9]+/\d+\.htm)"', b2)[:3]))
+    # C: 同 session 换词
+    kw2 = urllib.parse.quote('肖申克的救赎')
+    r3 = opA.open('https://v.xl.in.ua/search/' + kw2, timeout=20)
+    b3 = r3.read().decode('utf-8', 'ignore')
+    print('A third search diff kw: captcha=%s links=%s' % ('验证码' in b3, re.findall(r'href="(/[A-Za-z0-9]+/\d+\.htm)"', b3)[:3]))
+    # D: 新 session 是否免验证（IP 级？）
+    opB = new_opener()
+    r4 = opB.open(surl, timeout=20)
+    b4 = r4.read().decode('utf-8', 'ignore')
+    print('B new session: captcha=%s links=%s' % ('验证码' in b4, re.findall(r'href="(/[A-Za-z0-9]+/\d+\.htm)"', b4)[:3]))
+else:
+    print('A failed to solve captcha in 25 tries')

@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""验证码=算术题：OCR算式→计算→提交 完整流程验证"""
+import urllib.request, urllib.parse, http.cookiejar, re, ssl, time, io
+from PIL import Image
+import ddddocr
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+ocr = ddddocr.DdddOcr(show_ad=False)
+
+
+def parse_expr(s):
+    """从OCR文本解析 数字 op 数字 算式，返回 (a, op, b)"""
+    s = s.strip().replace('=', '').replace('?', '').replace('x', '*').replace('X', '*').replace('×', '*')
+    s = s.replace('z', '2').replace('s', '5').replace('o', '0').replace('O', '0')
+    # 常见 OCR 混淆：7->1? 保守起见只保留清晰模式
+    m = re.search(r'(\d+)\s*([+\-*/])\s*(\d+)', s)
+    if m:
+        return int(m.group(1)), m.group(2), int(m.group(3))
+    return None
+
+
+def compute(expr):
+    a, op, b = expr
+    if op == '+': return a + b
+    if op == '-': return a - b
+    if op == '*': return a * b
+    if op == '/':
+        return a // b if b and a % b == 0 else None
+    return None
+
+
+def fetch_verify_img(op, path):
+    r = op.open('https://v.xl.in.ua' + path, timeout=25)
+    return r.read()
+
+
+def preprocess(img_bytes):
+    img = Image.open(io.BytesIO(img_bytes)).convert('L')
+    big = img.resize((img.width * 4, img.height * 4), Image.LANCZOS)
+    bw = big.point(lambda x: 0 if x < 150 else 255)
+    buf = io.BytesIO()
+    bw.save(buf, format='PNG')
+    return buf.getvalue()
+
+
+cj = http.cookiejar.CookieJar()
+op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+op.addheaders = [('User-Agent', UA), ('Referer', 'https://v.xl.in.ua/')]
+
+kwq = urllib.parse.quote('流浪地球')
+op.open('https://v.xl.in.ua/', timeout=25)
+
+for attempt in range(10):
+    r = op.open('https://v.xl.in.ua/search/' + kwq, timeout=25)
+    b = r.read().decode('utf-8', 'ignore')
+    m = re.search(r'/search/verifyCode\?t=\d+', b)
+    if not m:
+        links = re.findall(r'href="(/[A-Za-z0-9]+/\d+\.htm)"', b)
+        print('attempt %d: SUCCESS no captcha! links=%s' % (attempt, links[:5]))
+        open('/tmp/search_ok.html', 'w').write(b)
+        break
+    img = fetch_verify_img(op, m.group(0))
+    for prep_name, prep in [('raw', lambda x: x), ('proc', preprocess)]:
+        ocr_text = ocr.classification(prep(img))
+        expr = parse_expr(ocr_text)
+        if expr:
+            ans = compute(expr)
+            print('attempt %d [%s]: ocr=%r expr=%s ans=%s' % (attempt, prep_name, ocr_text, expr, ans))
+            if ans is not None and 0 <= ans < 1000000:
+                break
+    else:
+        print('attempt %d: no parseable expr' % attempt)
+        continue
+    if ans is None:
+        continue
+    r3 = op.open('https://v.xl.in.ua/search/' + kwq + '?code=' + str(ans), timeout=25)
+    b3 = r3.read().decode('utf-8', 'ignore')
+    links3 = re.findall(r'href="(/[A-Za-z0-9]+/\d+\.htm)"', b3)
+    if links3 and '验证码' not in b3:
+        print('attempt %d: *** SUCCESS! ans=%s links=%s' % (attempt, ans, links3[:5]))
+        open('/tmp/search_ok.html', 'w').write(b3)
+        break
+    else:
+        m2 = re.search(r'(错误|正确|失败|成功|验证码)[^<]{0,60}', b3)
+        print('attempt %d: submit ans=%s FAIL captcha=%s %s' % (attempt, ans, '验证码' in b3, m2.group(0) if m2 else ''))
+    time.sleep(1)

@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import urllib.request, urllib.parse, http.cookiejar, re, ssl
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+cj = http.cookiejar.CookieJar()
+op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+op.addheaders = [('User-Agent', UA), ('Referer', 'https://v.xl.in.ua/')]
+
+kw = urllib.parse.quote('流浪地球')
+url = 'https://v.xl.in.ua/search/' + kw
+r = op.open(url, timeout=25)
+b = r.read().decode('utf-8', 'ignore')
+print('search len:', len(b), 'captcha:', '验证码' in b)
+
+# 验证码图片
+m = re.search(r'/search/verifyCode\?t=\d+', b)
+print('verify path:', m.group(0) if m else None)
+if m:
+    r2 = op.open('https://v.xl.in.ua' + m.group(0), timeout=25)
+    img = r2.read()
+    open('/tmp/vcode.png', 'wb').write(img)
+    print('img size:', len(img), 'content-type:', r2.headers.get('Content-Type'))
+    import binascii
+    print('magic:', binascii.hexlify(img[:16]))
+
+# 尝试猜验证码接口格式：GET verify -> POST check?
+# 先看按钮 JS 提交流程（common.js 中 decode 部分）
+r3 = op.open('https://v.xl.in.ua/v5/js/common.js?v=0.3', timeout=25)
+js = r3.read().decode('utf-8', 'ignore')
+print('--- common.js search/code 相关 ---')
+for line in js.splitlines():
+    if any(k in line for k in ('search', 'verify', 'Code', 'code')):
+        print(line.strip()[:200])
