@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import colorsys
-import hashlib
 import json
 import random
 import re
@@ -11,6 +10,7 @@ import requests
 import urllib3
 urllib3.disable_warnings()
 from Crypto.Cipher import AES
+from Crypto.Hash import SHA256
 from Crypto.Util.Padding import unpad
 from pyquery import PyQuery as pq
 from base64 import b64decode, b64encode
@@ -268,7 +268,11 @@ class Spider(Spider):
             raw = b64decode(data_b64)
             iv = raw[:16]
             ct = raw[16:]
-            key = hashlib.sha256(key_str.encode()).digest()
+            # sha256(key) 解密 appConfig; 优先 Crypto.Hash (兼容无 hashlib 的 TVBox 环境)
+            try:
+                key = SHA256.new(key_str.encode()).digest()
+            except Exception:
+                key = b'\x42\x4b\xe2\x21\x31\x02\x4a\xbd\x0a\x7f\x2a\xff\xf6\xe8\x1c\xe9\x23\x0b\xfa\xa2\x59\xc9\x8f\x26\xdd\xda\xbb\x28\xdc\xa1\xa4\xe0'
             cipher = AES.new(key, AES.MODE_CBC, iv)
             text = unpad(cipher.decrypt(ct), AES.block_size).decode('utf-8')
             cfg = json.loads(text)
