@@ -77,6 +77,7 @@ async function category(tid, pg, filter, extend) {
     }));
     return JSON.stringify({
         page: pg,
+        pagecount: 999,
         list: videos
     });
 }
@@ -88,8 +89,8 @@ async function detail(id) {
     let html = await req(`${host}/api/video/detailv2?id=${id}`, { headers: { 'User-Agent': UA, 'Referer': host } });
     let data = JSON.parse(html.content).data;
     
-    // 线路处理：将“常规线路”显示为“边下边播”
-    let play_from = data.source_list_source.map(item => item.name).join('$$$').replace(/常规线路/g, '边下边播');
+    // 线路名（实测为 VIP线路/蓝光线路/极速蓝光 等，无需二次替换）
+    let play_from = data.source_list_source.map(item => item.name).join('$$$');
     let play_url = data.source_list_source.map(play =>
         play.source_list.map(({source_name, url}) => `${source_name}$${url}`).join('#')
     ).join('$$$');
@@ -99,7 +100,7 @@ async function detail(id) {
         vod_name: data.title,
         vod_year: data.year,
         vod_area: data.area,
-        vod_remarks: data.mask,
+        vod_remarks: data.mask || data.score || '',
         vod_content: data.description,
         vod_play_from: play_from,
         vod_play_url: play_url,

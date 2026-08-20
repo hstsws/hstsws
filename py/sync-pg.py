@@ -7,7 +7,6 @@ from typing import Union
 import os
 import re
 import sys
-import git
 import json
 import requests
 import subprocess
@@ -178,60 +177,56 @@ class TGDown:
             subprocess.call(['rm', '-rf', self.repo])
         try:
             print(f'开始克隆：git clone https://{self.registry}/{self.username}/{self.repo}.git')
-            git.Repo.clone_from(self.domain, to_path=self.repo, depth=1)
+            subprocess.check_call(['git', 'clone', '--depth', '1', self.domain, self.repo])
         except Exception as e:
             try:
                 self.registry = 'https://gh.clun.top/'
                 self.domain = f'https://{self.token}@{self.registry}/https://github.com/{self.username}/{self.repo}.git'
                 if os.path.exists(self.repo):
                     subprocess.call(['rm', '-rf', self.repo])
-                repo = git.Repo.clone_from(self.domain, to_path=self.repo, depth=1)
+                subprocess.check_call(['git', 'clone', '--depth', '1', self.domain, self.repo])
             except Exception as e:
                 print(222222, e)
     def get_local_repo(self):
-        # 打开本地仓库，读取仓库信息
-        repo = git.Repo(self.repo)
-        config_writer = repo.config_writer()
-        config_writer.set_value('user', 'name', self.username)
-        config_writer.set_value('user', 'email', self.username)
-        # 设置 http.postBuffer
-        config_writer.set_value('http', 'postBuffer', '104857600')
-        config_writer.release()
-        # 获取远程仓库的引用
-        remote = repo.remote(name='origin')
-        # 获取远程分支列表
-        remote_branches = remote.refs
-        # 遍历远程分支，查找主分支
-        for branch in remote_branches:
-            if branch.name == 'origin/master' or branch.name == 'origin/main':
-                self.branch = branch.name.split('/')[-1]
+        # 设置 git 用户信息
+        subprocess.call(['git', 'config', 'user.name', self.username])
+        subprocess.call(['git', 'config', 'user.email', self.username])
+        os.chdir(self.repo)
+        subprocess.call(['git', 'config', 'user.name', self.username])
+        subprocess.call(['git', 'config', 'user.email', self.username])
+        subprocess.call(['git', 'config', 'http.postBuffer', '104857600'])
+        # 获取主分支
+        result = subprocess.run(['git', 'branch', '-r'], capture_output=True, text=True)
+        for line in result.stdout.splitlines():
+            name = line.strip()
+            if name == 'origin/master' or name == 'origin/main':
+                self.branch = name.split('/')[-1]
                 break
-        # print(f"仓库{self.repo} 主分支为: {self.main_branch}")
-        return repo
-    def reset_commit(self,repo):
+        return True
+    def reset_commit(self, repo):
         # 重置commit
         try:
             os.chdir(self.repo)
             # print('开始清理git',os.getcwd())
-            repo.git.checkout('--orphan', 'tmp_branch')
-            repo.git.add(A=True)
-            repo.git.commit(m="update")
-            repo.git.execute(['git', 'branch', '-D', self.branch])
-            repo.git.execute(['git', 'branch', '-m', self.branch])
-            repo.git.execute(['git', 'push', '-f', 'origin', self.branch])
+            subprocess.call(['git', 'checkout', '--orphan', 'tmp_branch'])
+            subprocess.call(['git', 'add', '-A'])
+            subprocess.call(['git', 'commit', '-m', 'update'])
+            subprocess.call(['git', 'branch', '-D', self.branch])
+            subprocess.call(['git', 'branch', '-m', self.branch])
+            subprocess.call(['git', 'push', '-f', 'origin', self.branch])
         except Exception as e:
             print('git清理异常', e)
-    def git_push(self,repo):
+    def git_push(self, repo):
         # 推送并重置commit计数
         print(f'开始推送：git push https://{self.registry}/{self.username}/{self.repo}.git')
         try:
-            repo.git.add(A=True)
-            repo.git.commit(m="update")
-            repo.git.push()
+            subprocess.call(['git', 'add', '-A'])
+            subprocess.call(['git', 'commit', '-m', 'update'])
+            subprocess.call(['git', 'push'])
             self.reset_commit(repo)
         except Exception as e:
             try:
-                repo.git.execute(['git', 'push', '--set-upstream', 'origin', self.branch])
+                subprocess.call(['git', 'push', '--set-upstream', 'origin', self.branch])
                 self.reset_commit(repo)
             except Exception as e:
                 print('git推送异常', e)

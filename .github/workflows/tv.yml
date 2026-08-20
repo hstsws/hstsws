@@ -35,7 +35,7 @@ jobs:
       with:
         token: ${{ github.token }}
         repository: ${{ github.repository }}
-        retain_days: 1
+        retain_days: 7
         keep_minimum_runs: 3
 
     - name: Set up Python
@@ -58,21 +58,18 @@ jobs:
       run: |
         git config --global user.name "github-actions[bot]"
         git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        
-        # if [ -n "$(git status --porcelain)" ]; then
-          # echo "Changes detected, committing..."
-          # git add .
-          # git commit -m "Update m3u"
-          
-          # git pull --rebase origin main
-          # git push origin main
-        # else
-          # echo "No changes detected, skipping push."
-        # fi
-        
-        git commit -a -m "Update m3u"
-        
+
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "Changes detected, committing..."
+          git add .
+          git commit -m "Update m3u"
+          echo "PUSH_NEEDED=1" >> "$GITHUB_ENV"
+        else
+          echo "No changes detected, skipping push."
+        fi
+
     - name: Push changes
+      if: env.PUSH_NEEDED == '1'
       uses: ad-m/github-push-action@master
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
