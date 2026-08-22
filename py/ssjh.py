@@ -13,9 +13,14 @@ TARGET_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "lib"))
 M3U_FILE = os.path.join(TARGET_DIR, "sbjh.m3u")
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json, */*",
+    # 完整浏览器级请求头，所有上游请求统一使用，降低被 WAF/限流拦截的概率
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Referer": BASE_URL,
+    "Connection": "keep-alive",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
 }
 
 MAX_WORKERS = 4          # 并发上限，宁慢勿封
