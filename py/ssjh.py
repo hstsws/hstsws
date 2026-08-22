@@ -3,6 +3,7 @@ import os
 import logging
 import sys
 import asyncio
+import random
 import aiohttp
 
 BASE_URL = "http://api.hclyz.com:81/mf"
@@ -11,9 +12,15 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TARGET_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "lib"))
 M3U_FILE = os.path.join(TARGET_DIR, "sbjh.m3u")
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json, */*",
+    "Referer": BASE_URL,
+}
 
-MAX_WORKERS = 5
+MAX_WORKERS = 4          # 并发上限，宁慢勿封
+RETRY_STATUS = {412, 425, 429, 500, 502, 503, 504}   # 需要重试的状态码
+PERMANENT_STATUS = {400, 401, 403, 404, 410}         # 重试也没用的状态码
 
 def setup_logging():
     logger = logging.getLogger("ScraperLogger")
@@ -29,23 +36,38 @@ def setup_logging():
 
 log = setup_logging()
 
-async def safeGetJson(url, session, maxRetries=3, retryDelay=2):
-    for attemptCount in range(maxRetries):
+async def safeGetJson(url, session, maxRetries=4, baseDelay=2.0):
+    for attemptCount in range(1, maxRetries + 1):
         try:
-            # Set 10 seconds timeout to prevent freezing
-            async with session.get(url, headers=HEADERS, timeout=10) as responseObj:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with session.get(url, headers=HEADERS, timeout=timeout) as responseObj:
                 if responseObj.status == 200:
                     return await responseObj.json(content_type=None)
-                
-                # Log non-200 status codes like 412
-                log.warning(f"HTTP {responseObj.status} for {url}. Attempt {attemptCount + 1} of {maxRetries}")
+
+                if responseObj.status in PERMANENT_STATUS:
+                    # 404/403 等永久错误，重试无意义，直接放弃
+                    log.warning(f"HTTP {responseObj.status} (permanent) for {url}, giving up")
+                    await responseObj.read()   # 读掉 body 以便复用连接
+                    return None
+
+                log.warning(f"HTTP {responseObj.status} for {url}. Attempt {attemptCount}/{maxRetries}")
+
+                if attemptCount < maxRetries:
+                    # 优先遵循服务端的 Retry-After
+                    retryAfter = responseObj.headers.get("Retry-After")
+                    if retryAfter and retryAfter.isdigit():
+                        delay = min(float(retryAfter), 30)
+                    else:
+                        # 指数退避 + 随机抖动，避免固定节奏撞限流
+                        delay = baseDelay * (2 ** (attemptCount - 1)) * (1 + random.random())
+                    await asyncio.sleep(delay)
+                else:
+                    await responseObj.read()
         except Exception as e:
-            log.error(f"Request Exception: {url} -> {e}. Attempt {attemptCount + 1} of {maxRetries}")
-        
-        # Wait before the next retry
-        if attemptCount < maxRetries - 1:
-            await asyncio.sleep(retryDelay)
-            
+            log.error(f"Request Exception: {url} -> {e}. Attempt {attemptCount}/{maxRetries}")
+            if attemptCount < maxRetries:
+                await asyncio.sleep(baseDelay * (2 ** (attemptCount - 1)) * (1 + random.random()))
+
     return None
 
 async def processPlatform(item, session, sem):
@@ -79,7 +101,10 @@ async def processPlatform(item, session, sem):
                 errors += 1
                 continue
 
-            results.append((groupName, name, url, platformLogo))
+            anchorImg = (vod.get("img") or "").strip()
+            logo = anchorImg or platformLogo
+
+            results.append((groupName, name, url, logo))
 
         return roomTitle, results, errors
 
@@ -89,8 +114,8 @@ async def mainAsync():
 
     log.info("🚀 Enhanced task initiated.")
     
-    # Increase limit_per_host to prevent DNS resolution issues
-    connector = aiohttp.TCPConnector(limit=MAX_WORKERS, limit_per_host=10)
+    # 限流防护：连接池与信号量对齐，避免突发并发触发服务端限制
+    connector = aiohttp.TCPConnector(limit=MAX_WORKERS, limit_per_host=MAX_WORKERS)
     async with aiohttp.ClientSession(connector=connector) as session:
 
         home = await safeGetJson(f"{BASE_URL}/json.txt", session)
