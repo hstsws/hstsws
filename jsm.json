@@ -153,6 +153,7 @@
 			"name": "光鸭社区",
 			"type": 3,
 			"api": "csp_GuangYaShequ",
+			"timeout":60,
 			"searchable": 1,
 			"quickSearch": 1,
 			"filterable": 0,

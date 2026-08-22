@@ -6,13 +6,24 @@ import re
 import sys
 import threading
 import time
-import requests
 import urllib3
-urllib3.disable_warnings()
+try:
+    urllib3.disable_warnings()
+except Exception:
+    pass
+from requests import Session
 from Crypto.Cipher import AES
-from Crypto.Hash import SHA256
 from Crypto.Util.Padding import unpad
-from pyquery import PyQuery as pq
+try:
+    from Crypto.Hash import SHA256
+except Exception:
+    SHA256 = None
+import hashlib
+from lxml import etree
+try:
+    import cssselect
+except Exception:
+    cssselect = None
 from base64 import b64decode, b64encode
 from pprint import pprint
 from urllib.parse import urlparse, quote, unquote
@@ -22,26 +33,107 @@ from base.spider import Spider
 
 class Spider(Spider):
 
+    FALLBACK_HOSTS = [
+        'https://nutkvpuvh.oozzvqhzt.cc',
+        'https://emxhyyqylw.rigxwsgw.com',
+        'https://www.udhxdfgk.cc',
+        'https://ktotmwbfwp.oozzvqhzt.cc',
+    ]
+
     def init(self, extend="{}"):
         self.domin='https://cg51.com'
         self.proxies = {}
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
             'sec-ch-ua': '"Not/A)Brand";v="8", "Chromium";v="134", "Google Chrome";v="134"',
-            'Accept-Language': 'zh-CN,zh;q=0.9'
+            'sec-ch-ua-mobile': '?1',
+            'sec-ch-ua-platform': '"Android"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+            'X-Requested-With': 'mark.via.gp'
         }
-        self.host=self.host_late(self.gethosts())
-        if not self.host:
-            self.host=self.domin
+        self.session = Session()
+        self.session.verify = False
+        hosts = []
+        try:
+            ok = self.getCache('host_51ok')
+            if ok:
+                hosts.append(ok)
+        except Exception:
+            pass
+        gl = self.gethosts()
+        if isinstance(gl, str):
+            gl = [u.strip() for u in gl.split(',') if u.strip()]
+        for u in (gl or []):
+            if u not in hosts:
+                hosts.append(u)
+        for u in self.FALLBACK_HOSTS:
+            if u not in hosts:
+                hosts.append(u)
+        self.host = self.host_late(hosts) or self.FALLBACK_HOSTS[0]
+        try:
+            self.setCache('host_51ok', self.host)
+        except Exception:
+            pass
         self.headers.update({'Origin': self.host, 'Referer': f"{self.host}/"})
+        self.session.headers.update(self.headers)
         thread = threading.Thread(target=self.getcnh)
         thread.start()
+
+    def switch_host(self, host):
+        """运行期切换线路并同步请求头"""
+        self.host = host
+        self.headers.update({'Origin': host, 'Referer': f"{host}/"})
+        self.session.headers.update(self.headers)
+        try:
+            self.setCache('host_51ok', host)
+        except Exception:
+            pass
 
     def log(self, *args):
         try:
             print(*args)
         except Exception:
             pass
+
+    def pq(self, html):
+        """pyquery替代: lxml.html + cssselect, 返回包装对象"""
+        from lxml import html as lhtml
+        return _PQ(lhtml.fromstring(html))
+
+    def req(self, url, timeout=15, **kw):
+        """统一请求入口: Session.get + 默认 headers/verify/proxies"""
+        kw.setdefault('timeout', timeout)
+        kw.setdefault('headers', self.headers)
+        kw.setdefault('proxies', self.proxies)
+        kw.setdefault('verify', False)
+        return self.session.get(url, **kw)
+
+    def getdoc(self, path_or_url):
+        """带自动换线的页面获取: 当前host失败则轮询FALLBACK_HOSTS"""
+        url = path_or_url if path_or_url.startswith('http') else f"{self.host}{path_or_url}"
+        try:
+            return self.pq(self.req(url).content)
+        except Exception as e:
+            self.log(f"请求失败换线: {e}")
+        candidates = [u for u in (list(self.FALLBACK_HOSTS) + [self.domin]) if u != self.host]
+        for h in candidates:
+            try:
+                nurl = path_or_url if path_or_url.startswith('http') else f"{h}{path_or_url}"
+                doc = self.pq(self.req(nurl, timeout=8).content)
+                self.switch_host(h)
+                self.log(f"切换线路成功: {h}")
+                return doc
+            except Exception:
+                continue
+        raise Exception(f"所有线路均不可达: {path_or_url}")
 
     def getName(self):
         return '51吸瓜'
@@ -56,7 +148,7 @@ class Spider(Spider):
         pass
 
     def homeContent(self, filter):
-        data=pq(requests.get(self.host, headers=self.headers,proxies=self.proxies, verify=False).content)
+        data=self.getdoc('/')
         result = {}
         classes = []
         for k in list(data('.navbar-nav.mr-auto').children('li').items())[1:-3]:
@@ -71,8 +163,34 @@ class Spider(Spider):
                     'type_name': k('a').text(),
                     'type_id': k('a').attr('href').strip(),
                 })
+        lst = self.getlist(data('#index article a'))
+        if not classes or not lst:
+            for h in [u for u in list(self.FALLBACK_HOSTS) + [self.domin] if u != self.host]:
+                try:
+                    nd = self.pq(self.req(f"{h}/", timeout=8).content)
+                    ncls = len(nd('.navbar-nav.mr-auto')('li'))
+                    nlst = self.getlist(nd('#index article a'))
+                    if ncls and nlst:
+                        self.switch_host(h)
+                        self.log(f"空壳页换线成功: {h}")
+                        data, classes, lst = nd, None, nlst
+                        for k in list(nd('.navbar-nav.mr-auto').children('li').items())[1:-3]:
+                            if k('ul'):
+                                for j in k('ul li').items():
+                                    classes.append({
+                                        'type_name': j('a').text(),
+                                        'type_id': j('a').attr('href').strip(),
+                                    })
+                            else:
+                                classes.append({
+                                    'type_name': k('a').text(),
+                                    'type_id': k('a').attr('href').strip(),
+                                })
+                        break
+                except Exception:
+                    continue
         result['class'] = classes
-        result['list'] = self.getlist(data('#index article a'))
+        result['list'] = lst
         return result
 
     def homeVideoContent(self):
@@ -85,9 +203,19 @@ class Spider(Spider):
         else:
             pg=int(pg or '1')
             tid=str(tid).strip('/')
-            url=f"{self.host}/{tid}/" if pg==1 else f"{self.host}/{tid}/{pg}/"
-            data=pq(requests.get(url, headers=self.headers,proxies=self.proxies, verify=False).content)
-            videos=self.getlist(data('#archive article a'),tid)
+            videos=self.getlist(self.getdoc(f"/{tid}/" if pg==1 else f"/{tid}/{pg}/"),f"/{tid}")
+            if not videos:
+                for h in [u for u in list(self.FALLBACK_HOSTS) + [self.domin] if u != self.host]:
+                    try:
+                        nd = self.pq(self.req(f"{h}/{tid}/" if pg==1 else f"{h}/{tid}/{pg}/", timeout=8).content)
+                        nv = self.getlist(nd('#archive article a'), f"/{tid}")
+                        if nv:
+                            self.switch_host(h)
+                            self.log(f"分类页换线成功: {h}")
+                            videos = nv
+                            break
+                    except Exception:
+                        continue
         result = {}
         result['list'] = videos
         result['page'] = pg
@@ -98,8 +226,9 @@ class Spider(Spider):
 
     def detailContent(self, ids):
         url=ids[0] if ids[0].startswith("http") else f"{self.host}{ids[0]}"
-        data=pq(requests.get(url, headers=self.headers,proxies=self.proxies, verify=False).content)
-        vod = {'vod_play_from': '51吸瓜'}
+        data=self.getdoc(url)
+        title=data('.post-title').text() or ''
+        vod = {'vod_id': url, 'vod_name': title, 'vod_pic': '', 'vod_play_from': '51吸瓜'}
         did = data('script[data-api]').attr('data-api') or ''
         try:
             clist = []
@@ -123,7 +252,7 @@ class Spider(Spider):
         return {'list':[vod]}
 
     def searchContent(self, key, quick, pg="1"):
-        data=pq(requests.get(f"{self.host}/search/{quote(key)}/", headers=self.headers,proxies=self.proxies, verify=False).content)
+        data=self.getdoc(f"/search/{quote(key)}/")
         return {'list':self.getlist(data('#archive article a')),'page':pg}
 
     def playerContent(self, flag, id, vipFlags):
@@ -140,7 +269,7 @@ class Spider(Spider):
             xtype=param.get('type','')
             if 'm3u8' in xtype:
                 path,url=unquote(param['pdid']).split('_dm_')
-                data=requests.get(url, headers=self.headers,proxies=self.proxies,timeout=10, verify=False).text
+                data=self.req(url, timeout=10).text
                 lines = data.strip().split('\n')
                 times=0.0
                 for i in lines:
@@ -152,7 +281,7 @@ class Spider(Spider):
                 return [200, 'text/plain', data]
             elif 'xdm' in xtype:
                 url=f"{self.host}{unquote(param['path'])}"
-                res = requests.get(url, headers=self.headers, proxies=self.proxies, timeout=10, verify=False).json()
+                res = self.req(url, timeout=10).json()
                 dms=[]
                 for k in res:
                     text=k.get('text')
@@ -172,7 +301,7 @@ class Spider(Spider):
             match = re.search(r"loadBannerDirect\('([^']*)'", url)
             if match:
                 url=match.group(1)
-            res = requests.get(url, headers=self.headers, proxies=self.proxies, timeout=10, verify=False)
+            res = self.req(url, timeout=10)
             return [200, res.headers.get('Content-Type'), self.aesimg(res.content)]
         except Exception as e:
             print(e)
@@ -246,14 +375,14 @@ class Spider(Spider):
             curl = ''
         if curl:
             try:
-                data = pq(requests.get(curl, headers=self.headers, proxies=self.proxies, verify=False).content)('a').attr('href')
+                data = self.pq(self.req(curl).content)('a').attr('href')
                 if data:
                     parsed_url = urlparse(data)
                     return parsed_url.scheme + "://" + parsed_url.netloc
             except Exception:
                 pass
         try:
-            page = requests.get(self.domin, headers=self.headers, proxies=self.proxies, verify=False).text
+            page = self.req(self.domin).text
             # 有效定义: 行首非注释的 window.appConfig = {
             m = re.search(r'(?m)^\s*window\.appConfig\s*=\s*\{', page)
             if not m:
@@ -270,7 +399,10 @@ class Spider(Spider):
             ct = raw[16:]
             # sha256(key) 解密 appConfig; 优先 Crypto.Hash (兼容无 hashlib 的 TVBox 环境)
             try:
-                key = SHA256.new(key_str.encode()).digest()
+                if SHA256 is not None:
+                    key = SHA256.new(key_str.encode()).digest()
+                else:
+                    key = hashlib.sha256(key_str.encode()).digest()
             except Exception:
                 key = b'\x42\x4b\xe2\x21\x31\x02\x4a\xbd\x0a\x7f\x2a\xff\xf6\xe8\x1c\xe9\x23\x0b\xfa\xa2\x59\xc9\x8f\x26\xdd\xda\xbb\x28\xdc\xa1\xa4\xe0'
             cipher = AES.new(key, AES.MODE_CBC, iv)
@@ -298,7 +430,7 @@ class Spider(Spider):
             if not self.host:
                 return
             url = f"{self.host}/homeway.html"
-            data = pq(requests.get(url, headers=self.headers, proxies=self.proxies, timeout=8, verify=False).content)
+            data = self.pq(self.req(url, timeout=8).content)
             a = data('.post-content[itemprop="articleBody"] blockquote p').eq(0)('a')
             href = a.attr('href')
             if href:
@@ -388,7 +520,7 @@ class Spider(Spider):
         return domains
 
     def get_domains(self):
-        html = pq(requests.get(self.domin, headers=self.headers,proxies=self.proxies, verify=False).content)
+        html = self.pq(self.req(self.domin).content)
         html_pattern = r"Base64\.decode\('([^']+)'\)"
         html_match = re.search(html_pattern, html('script').eq(-1).text(), re.DOTALL)
         if not html_match:
@@ -413,7 +545,7 @@ class Spider(Spider):
 
     def getfod(self, id):
         url = f"{self.host}{id}"
-        data = pq(requests.get(url, headers=self.headers, proxies=self.proxies, verify=False).content)
+        data = self.pq(self.req(url).content)
         vdata=data('.post-content[itemprop="articleBody"]')
         r=['.txt-apps','.line','blockquote','.tags','.content-tabs']
         for i in r:vdata.remove(i)
@@ -461,7 +593,7 @@ class Spider(Spider):
             try:
                 start_time = time.time()
                 # 用 GET 跟随跳转, 取最终可达域名 (线路会按路径随机跳子域)
-                response = requests.get(url, headers=self.headers, proxies=self.proxies, timeout=3.0, allow_redirects=True, verify=False)
+                response = self.req(url, timeout=3.0, allow_redirects=True)
                 delay = (time.time() - start_time) * 1000
                 if response.status_code == 200 and response.url:
                     results[url] = (delay, response.url)
@@ -491,7 +623,7 @@ class Spider(Spider):
             b=k('h2').text()
             c=k('span[itemprop="datePublished"]').text()
             if a and b and c and a.startswith('/'):
-                pic=k('script').text()
+                pic=k('script').text_raw()
                 videos.append({
                     'vod_id': f"{a}{'@folder' if l else ''}",
                     'vod_name': b.replace('\n', ' '),
@@ -508,3 +640,92 @@ class Spider(Spider):
         cipher = AES.new(key, AES.MODE_CBC, iv)
         decrypted = unpad(cipher.decrypt(word), AES.block_size)
         return decrypted
+
+
+class _PQ:
+    """最小 pyquery 兼容层, 基于 lxml.html + cssselect"""
+
+    def __init__(self, nodes):
+        if isinstance(nodes, _PQ):
+            nodes = nodes._nodes
+        self._nodes = list(nodes) if isinstance(nodes, (list, tuple)) else [nodes]
+
+    def __call__(self, selector=None):
+        if not selector:
+            return self
+        out = []
+        for el in self._nodes:
+            try:
+                out.extend(el.cssselect(selector))
+            except Exception:
+                pass
+        return _PQ(out)
+
+    def __bool__(self):
+        return len(self._nodes) > 0
+
+    def __len__(self):
+        return len(self._nodes)
+
+    def __getitem__(self, i):
+        return _PQ(self._nodes[i])
+
+    def items(self):
+        for el in self._nodes:
+            yield _PQ(el)
+
+    def eq(self, i):
+        return _PQ(self._nodes[i] if -len(self._nodes) <= i < len(self._nodes) else [])
+
+    def attr(self, name):
+        if not self._nodes:
+            return None
+        v = self._nodes[0].get(name)
+        return v
+
+    def text(self):
+        if not self._nodes:
+            return ''
+        parts = []
+        for el in self._nodes:
+            t = el.text_content().strip()
+            if isinstance(el.tag, str) and el.tag in ('script', 'style'):
+                continue
+            parts.append(t)
+        return '\n'.join(p for p in parts if p)
+
+    def text_raw(self):
+        if not self._nodes:
+            return ''
+        return '\n'.join(el.text_content() for el in self._nodes).strip()
+
+    def children(self, selector=None):
+        out = []
+        for el in self._nodes:
+            if hasattr(el, 'iterchildren'):
+                out.extend(el.iterchildren())
+        if selector:
+            sel = _css_to_xpath_safe(selector)
+            if sel:
+                from lxml import etree as _e
+                xp = _e.XPath(sel)
+                out = [c for c in out if xp(c)]
+        return _PQ(out)
+
+    def remove(self, selectors):
+        for sel in selectors.split(','):
+            try:
+                for el in self(sel)._nodes:
+                    parent = el.getparent()
+                    if parent is not None:
+                        parent.remove(el)
+            except Exception:
+                pass
+
+
+def _css_to_xpath_safe(selector):
+    try:
+        from cssselect import GenericTranslator
+        return GenericTranslator().css_to_xpath(selector)
+    except Exception:
+        return None
