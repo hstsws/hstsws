@@ -36,7 +36,6 @@ class Spider(Spider):
     FALLBACK_HOSTS = [
         'https://nutkvpuvh.oozzvqhzt.cc',
         'https://emxhyyqylw.rigxwsgw.com',
-        'https://www.udhxdfgk.cc',
         'https://ktotmwbfwp.oozzvqhzt.cc',
     ]
 
