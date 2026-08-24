@@ -1,55 +1,27 @@
 {
  "sites": [
   {
-   "key": "py_sszzyy",
-   "name": "西瓜影视[py]",
+   "key": "youtube",
+   "name": "YouTube",
    "type": 3,
-   "api": "./py/sszzyy.py",
+   "api": "csp_YouTube",
+   "jar": "./jar/yt-vce.jar",
    "searchable": 1,
-   "quickSearch": 1,
-   "filterable": 1,
-   "ext": {}
+   "changeable": 0,
+   "ext": "./lib/yt-vce.json"
   },
   {
-   "key": "py_fqdm",
-   "name": "番茄动漫[py]",
+   "key": "youtube2",
+   "name": "YouTube",
    "type": 3,
-   "api": "./py/fqdm.py",
+   "api": "./py/yt_clun.py",
    "searchable": 1,
    "quickSearch": 1,
-   "filterable": 1
-  },
-  {
-   "key": "py_ss",
-   "name": "影视|PY",
-   "type": 3,
-   "api": "./py/四色.py",
-   "searchable": 1,
-   "quickSearch": 1,
-   "filterable": 1
-  },
-  {
-   "key": "py_xlys",
-   "name": "雪落影视[py]",
-   "type": 3,
-   "api": "./py/xlys.py",
-   "searchable": 1,
-   "quickSearch": 1,
-   "filterable": 1,
+   "filterable": 0,
    "ext": {
-    "host": "https://v.xl.in.ua",
-    "pageFmt": ""
+    "cookie": "",
+    "json": "./lib/youtube.json"
    }
-  },
-  {
-   "key": "py_ddmf",
-   "name": "蛋蛋影视[py]",
-   "type": 3,
-   "api": "./py/ddmf.py",
-   "searchable": 1,
-   "quickSearch": 1,
-   "filterable": 1,
-   "ext": "{\"host\":\"https://www.ddmf.net\",\"pageFmt\":\"\"}"
   }
  ],
  "spider": "./jar/yt.jar",
