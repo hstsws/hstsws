@@ -5,6 +5,7 @@
 const baseUrl = 'https://www.x8kb9k8.com';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36';
 const HEADERS = { 'User-Agent': UA, 'Referer': baseUrl + '/', 'Accept': 'text/html' };
+const PLAY_HEADERS = { 'User-Agent': UA, 'Referer': baseUrl + '/', 'Origin': baseUrl };
 
 async function init(cfg) { return {}; }
 function destroy() { return {}; }
@@ -116,9 +117,12 @@ function parseCardsFallback(html) {
     if (!name) { const am = /alt="([^"]+)"/.exec(inner); if (am) name = am[1]; }
     if (!name) continue;
     let pic = '';
-    const im = /<img[^>]*src="([^"]+)"/.exec(inner);
-    if (im) pic = im[1];
-    if (pic.indexOf('site_logo') >= 0) pic = '';
+    const imSet = /<img[^>]*srcSet="([^"]+)"/.exec(inner);
+    const imSrc = /<img[^>]*src="([^"]+)"/.exec(inner);
+    const imOrig = /data-original="([^"]+)"/.exec(inner);
+    const bg = /background-image:url\((https?:[^)]+)\)/.exec(inner);
+    const cand = (imOrig && imOrig[1]) || (imSet && imSet[1].split(',')[0].split(' ')[0]) || (imSrc && imSrc[1]) || (bg && bg[1]) || '';
+    if (cand && cand.indexOf('site_logo') < 0 && cand.indexOf('data:') !== 0) pic = cand;
     let score = '';
     const sm = /<div[^>]*class="[^"]*score[^"]*"[^>]*>(.*?)<\/div>/.exec(inner);
     if (sm) score = stripTags(sm[1]);
@@ -137,43 +141,38 @@ async function home(filter) {
     { type_id: '4', type_name: '动漫' },
     { type_id: '88', type_name: '短剧' }
   ];
-  const sortRow = { key: 'sort', name: '排序', value: [v('全部', ''), v('时间', 'time'), v('人气', 'hits'), v('评分', 'score')] };
   const filters = {
     '1': [
-      { key: 'type', name: '类型', value: [v('全部', ''), v('喜剧', '22'), v('动作', '23'), v('科幻', '30'), v('爱情', '26'), v('悬疑', '27'), v('剧情', '37'), v('恐怖', '36'), v('犯罪', '35'), v('惊悚', '34'), v('战争', '25'), v('冒险', '31')] },
-      { key: 'class', name: '剧情', value: [v('全部', ''), v('喜剧', '喜剧'), v('动作', '动作'), v('爱情', '爱情'), v('科幻', '科幻'), v('悬疑', '悬疑'), v('剧情', '剧情'), v('犯罪', '犯罪'), v('惊悚', '惊悚'), v('恐怖', '恐怖')] },
-      { key: 'area', name: '地区', value: [v('全部', ''), v('中国大陆', '中国大陆'), v('中国香港', '中国香港'), v('中国台湾', '中国台湾'), v('美国', '美国'), v('日本', '日本'), v('韩国', '韩国'), v('英国', '英国'), v('法国', '法国'), v('其他', '其他')] },
-      { key: 'year', name: '年份', value: [v('全部', ''), v('2026', '2026'), v('2025', '2025'), v('2024', '2024'), v('2023', '2023'), v('2022', '2022'), v('2021', '2021'), v('2020', '2020')] },
-      { key: 'lang', name: '语言', value: [v('全部', ''), v('国语', '国语'), v('英语', '英语'), v('粤语', '粤语'), v('日语', '日语'), v('韩语', '韩语'), v('其他', '其他')] },
-      sortRow
+      { key: 'class', name: '剧情', value: [v('全部', ''), v('喜剧', '喜剧'), v('动作', '动作'), v('爱情', '爱情'), v('科幻', '科幻'), v('悬疑', '悬疑'), v('奇幻', '奇幻'), v('恐怖', '恐怖'), v('剧情', '剧情'), v('犯罪', '犯罪'), v('动画', '动画'), v('惊悚', '惊悚'), v('战争', '战争'), v('冒险', '冒险'), v('灾难', '灾难'), v('伦理', '伦理'), v('其他', '其他')] },
+      { key: 'area', name: '地区', value: [v('全部', ''), v('中国大陆', '中国大陆'), v('中国香港', '中国香港'), v('中国台湾', '中国台湾'), v('美国', '美国'), v('日本', '日本'), v('韩国', '韩国'), v('印度', '印度'), v('泰国', '泰国'), v('英国', '英国'), v('法国', '法国'), v('其他', '其他')] },
+      { key: 'year', name: '年份', value: [v('全部', ''), v('2026', '2026'), v('2025', '2025'), v('2024', '2024'), v('2023', '2023'), v('2022', '2022'), v('2021', '2021'), v('2020', '2020'), v('2019', '2019'), v('2018', '2018'), v('2017', '2017'), v('2016', '2016'), v('2015', '2015'), v('2014', '2014'), v('2013', '2013'), v('2012', '2012'), v('2011', '2011'), v('2010', '2010'), v('2009~2000', '2009~2000')] },
+      { key: 'lang', name: '语言', value: [v('全部', ''), v('国语', '国语'), v('英语', '英语'), v('粤语', '粤语'), v('韩语', '韩语'), v('日语', '日语'), v('其他', '其他')] }
     ],
     '2': [
       { key: 'type', name: '类型', value: [v('全部', ''), v('国产剧', '14'), v('欧美剧', '15'), v('港台剧', '16'), v('日韩剧', '62'), v('其他剧', '68')] },
-      { key: 'class', name: '剧情', value: [v('全部', ''), v('古装', '古装'), v('战争', '战争'), v('喜剧', '喜剧'), v('家庭', '家庭'), v('犯罪', '犯罪'), v('动作', '动作'), v('剧情', '剧情')] },
-      { key: 'area', name: '地区', value: [v('全部', ''), v('中国大陆', '中国大陆'), v('中国香港', '中国香港'), v('中国台湾', '中国台湾'), v('美国', '美国'), v('日本', '日本'), v('韩国', '韩国'), v('其他', '其他')] },
-      { key: 'year', name: '年份', value: [v('全部', ''), v('2026', '2026'), v('2025', '2025'), v('2024', '2024'), v('2023', '2023'), v('2022', '2022')] },
-      { key: 'lang', name: '语言', value: [v('全部', ''), v('国语', '国语'), v('英语', '英语'), v('粤语', '粤语'), v('日语', '日语'), v('韩语', '韩语'), v('其他', '其他')] },
-      sortRow
+      { key: 'class', name: '剧情', value: [v('全部', ''), v('古装', '古装'), v('战争', '战争'), v('喜剧', '喜剧'), v('家庭', '家庭'), v('犯罪', '犯罪'), v('动作', '动作'), v('奇幻', '奇幻'), v('剧情', '剧情'), v('历史', '历史'), v('短片', '短片'), v('其他', '其他')] },
+      { key: 'area', name: '地区', value: [v('全部', ''), v('中国大陆', '中国大陆'), v('中国香港', '中国香港'), v('中国台湾', '中国台湾'), v('日本', '日本'), v('韩国', '韩国'), v('美国', '美国'), v('泰国', '泰国'), v('其他', '其他')] },
+      { key: 'year', name: '年份', value: [v('全部', ''), v('2026', '2026'), v('2025', '2025'), v('2024', '2024'), v('2023', '2023'), v('2022', '2022'), v('2021', '2021'), v('2020', '2020'), v('2019', '2019'), v('2018', '2018'), v('2017', '2017'), v('2016', '2016'), v('2015', '2015'), v('2014', '2014'), v('2013', '2013'), v('2012', '2012'), v('2011', '2011'), v('2010', '2010')] },
+      { key: 'lang', name: '语言', value: [v('全部', ''), v('国语', '国语'), v('英语', '英语'), v('粤语', '粤语'), v('韩语', '韩语'), v('日语', '日语'), v('泰语', '泰语'), v('其他', '其他')] }
     ],
     '3': [
       { key: 'type', name: '类型', value: [v('全部', ''), v('国产综艺', '69'), v('港台综艺', '70'), v('日韩综艺', '72'), v('欧美综艺', '73')] },
       { key: 'class', name: '剧情', value: [v('全部', ''), v('真人秀', '真人秀'), v('音乐', '音乐'), v('脱口秀', '脱口秀')] },
-      { key: 'area', name: '地区', value: [v('全部', ''), v('中国大陆', '中国大陆'), v('美国', '美国'), v('日本', '日本'), v('韩国', '韩国'), v('其他', '其他')] },
-      { key: 'year', name: '年份', value: [v('全部', ''), v('2026', '2026'), v('2025', '2025'), v('2024', '2024'), v('2023', '2023')] },
-      sortRow
+      { key: 'area', name: '地区', value: [v('全部', ''), v('中国大陆', '中国大陆'), v('中国香港', '中国香港'), v('中国台湾', '中国台湾'), v('日本', '日本'), v('韩国', '韩国'), v('美国', '美国'), v('其他', '其他')] },
+      { key: 'year', name: '年份', value: [v('全部', ''), v('2026', '2026'), v('2025', '2025'), v('2024', '2024'), v('2023', '2023'), v('2022', '2022'), v('2021', '2021'), v('2020', '2020')] },
+      { key: 'lang', name: '语言', value: [v('全部', ''), v('国语', '国语'), v('英语', '英语'), v('粤语', '粤语'), v('韩语', '韩语'), v('日语', '日语'), v('其他', '其他')] }
     ],
     '4': [
       { key: 'type', name: '类型', value: [v('全部', ''), v('国产动漫', '75'), v('日韩动漫', '76'), v('欧美动漫', '77')] },
-      { key: 'class', name: '剧情', value: [v('全部', ''), v('喜剧', '喜剧'), v('科幻', '科幻'), v('热血', '热血'), v('冒险', '冒险'), v('动作', '动作')] },
+      { key: 'class', name: '剧情', value: [v('全部', ''), v('喜剧', '喜剧'), v('科幻', '科幻'), v('热血', '热血'), v('冒险', '冒险'), v('动作', '动作'), v('运动', '运动'), v('战争', '战争'), v('动画', '动画')] },
       { key: 'area', name: '地区', value: [v('全部', ''), v('中国大陆', '中国大陆'), v('日本', '日本'), v('美国', '美国'), v('其他', '其他')] },
-      { key: 'year', name: '年份', value: [v('全部', ''), v('2026', '2026'), v('2025', '2025'), v('2024', '2024'), v('2023', '2023')] },
-      sortRow
+      { key: 'year', name: '年份', value: [v('全部', ''), v('2026', '2026'), v('2025', '2025'), v('2024', '2024'), v('2023', '2023'), v('2022', '2022'), v('2021', '2021'), v('2020', '2020'), v('2019', '2019'), v('2018', '2018'), v('2017', '2017'), v('2016', '2016'), v('2015', '2015'), v('2014', '2014'), v('2013', '2013'), v('2012', '2012'), v('2011', '2011'), v('2010', '2010')] },
+      { key: 'lang', name: '语言', value: [v('全部', ''), v('国语', '国语'), v('英语', '英语'), v('日语', '日语'), v('其他', '其他')] }
     ],
     '88': [
-      { key: 'type', name: '类型', value: [v('全部', ''), v('喜剧', '100'), v('奇幻', '99'), v('悬疑', '97'), v('古装', '96'), v('剧情', '94')] },
-      { key: 'class', name: '剧情', value: [v('全部', ''), v('逆袭', '逆袭'), v('甜宠', '甜宠'), v('穿越', '穿越'), v('重生', '重生'), v('剧情', '剧情')] },
-      { key: 'year', name: '年份', value: [v('全部', ''), v('2026', '2026'), v('2025', '2025'), v('2024', '2024')] },
-      sortRow
+      { key: 'type', name: '类型', value: [v('全部', ''), v('喜剧', '100'), v('奇幻', '99'), v('惊悚', '98'), v('悬疑', '97'), v('古装', '96'), v('爱情', '95'), v('剧情', '94')] },
+      { key: 'class', name: '剧情', value: [v('全部', ''), v('逆袭', '逆袭'), v('甜宠', '甜宠'), v('虐恋', '虐恋'), v('穿越', '穿越'), v('重生', '重生'), v('剧情', '剧情'), v('科幻', '科幻'), v('武侠', '武侠'), v('爱情', '爱情'), v('动作', '动作'), v('战争', '战争'), v('冒险', '冒险'), v('其他', '其他')] },
+      { key: 'year', name: '年份', value: [v('全部', ''), v('2026', '2026'), v('2025', '2025'), v('2024', '2024'), v('2023', '2023'), v('2022', '2022'), v('2021', '2021'), v('2020', '2020'), v('更早', '更早')] }
     ]
   };
   return output({ class: classes, filters: filters });
@@ -185,11 +184,12 @@ async function homeVod() {
     const ft = flightText(html);
     const keys = ['homeNewMoviePageData', 'homeBroadcastPageData', 'newestTvPageData', 'newestVarietyPageData', 'newestCartoonPageData', 'newestShortTvPageData'];
     let list = [];
+    const seen = {};
     for (const k of keys) {
       const o = extractJsonByKey(ft, k);
       const arr = o && o.list ? o.list : null;
       if (arr) {
-        for (const it of arr.slice(0, 6)) { const m = mapVodItem(it); if (m) list.push(m); }
+        for (const it of arr.slice(0, 6)) { const m = mapVodItem(it); if (m && !seen[m.vod_id]) { seen[m.vod_id] = 1; list.push(m); } }
       }
       if (list.length >= 12) break;
     }
@@ -266,12 +266,16 @@ async function detail(id) {
     const total = get('vodTotal');
     if (!remarks) { if (serial && total) remarks = '(' + serial + '/' + total + ')'; else if (serial) remarks = '(' + serial + ')'; }
     let eps = [];
-    const em = /"episodeList":\[([\s\S]*?)\]/.exec(ft);
-    if (em) {
-      try { eps = JSON.parse('[' + em[1] + ']'); }
-      catch (e) {
-        const re2 = /"nid":(\d+),"name":"(.*?)"/g;
-        let mm; while ((mm = re2.exec(em[1])) !== null) eps.push({ nid: mm[1], name: mm[2] });
+    const epArr = extractJsonByKey(ft, 'episodeList');
+    if (Array.isArray(epArr)) eps = epArr;
+    else {
+      const em = /"episodeList":\[([\s\S]*?)\]/.exec(ft);
+      if (em) {
+        try { eps = JSON.parse('[' + em[1] + ']'); }
+        catch (e) {
+          const re2 = /"nid":(\d+),"name":"(.*?)"/g;
+          let mm; while ((mm = re2.exec(em[1])) !== null) eps.push({ nid: mm[1], name: mm[2] });
+        }
       }
     }
     let playUrl = '';
@@ -330,9 +334,9 @@ async function play(flag, id, vipFlags) {
     const html = await httpGet(playPage);
     const all = flightText(html) + '\n' + str(html);
     const m3 = /(https?:[^"'\\s<>]+\.m3u8[^"'\\s<>]*)/i.exec(all);
-    if (m3) return output({ parse: 0, url: m3[1], header: HEADERS });
+    if (m3) return output({ parse: 0, url: m3[1], header: PLAY_HEADERS });
     const mp4 = /(https?:[^"'\\s<>]+\.mp4[^"'\\s<>]*)/i.exec(all);
-    if (mp4) return output({ parse: 0, url: mp4[1], header: HEADERS });
+    if (mp4) return output({ parse: 0, url: mp4[1], header: PLAY_HEADERS });
     return output({ parse: 1, url: playPage, header: HEADERS });
   } catch (e) { return output({ parse: 1, url: playPage, header: HEADERS }); }
 }
