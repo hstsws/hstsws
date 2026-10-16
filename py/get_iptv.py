@@ -15,10 +15,44 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from logging.handlers import RotatingFileHandler
 
+# ============================================================================
+# 路径解析(修复回归): C2 曾把所有路径锚定到脚本所在目录，但两种部署布局下
+# 脚本位置不同，拼接结果不同:
+#   布局A(本工作区): <根>/get_iptv.py          -> 配置/输出期望在 <根>/py/config 与 <根>/lib
+#   布局B(tvbox CI): <根>/py/get_iptv.py       -> 期望仍在 <根>/py/config 与 <根>/lib
+# C2 的 BASE_DIR=dirname(__file__) 在布局B下等于 <根>/py，再拼 "py/config"
+# 产生 <根>/py/py/config(错误，即 CI 日志中的重复 py/py 段)。
+# 修复: 自动探测候选目录，取第一个真实存在者；都不存在时回退布局A基准。
+# ============================================================================
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def _resolve_first_dir(candidates, fallback):
+    """返回第一个真实存在的候选目录；都不存在时返回 fallback(便于日志定位)。"""
+    for c in candidates:
+        if os.path.isdir(c):
+            return c
+    return fallback
+
+CONFIG_DIR = _resolve_first_dir(
+    (
+        os.path.join(_SCRIPT_DIR, "py", "config"),          # 布局A/B 共用
+        os.path.join(_SCRIPT_DIR, "config"),                # 布局C: 配置与脚本同目录
+    ),
+    os.path.join(_SCRIPT_DIR, "py", "config"),
+)
+
+LIB_DIR = _resolve_first_dir(
+    (
+        os.path.join(_SCRIPT_DIR, "lib"),                   # 布局A: 输出在脚本根下
+        os.path.join(os.path.dirname(_SCRIPT_DIR), "lib"),  # 布局B: 输出在仓库根下
+    ),
+    os.path.join(_SCRIPT_DIR, "lib"),
+)
+
 # === 配置日志 ===
 def setup_logger():
     # 日志目录统一放 config 下，与源状态/报告同级，避免依赖"当前工作目录"
-    log_dir = "py/config/logs"
+    log_dir = os.path.join(CONFIG_DIR, "logs")
     # 确保日志目录存在
     os.makedirs(log_dir, exist_ok=True)
     
@@ -1034,11 +1068,11 @@ def append_unmatched_to_template(unmatched_template, target_template_file,
 
 if __name__ == "__main__":
     # === 配置区 ===
-    # 修复(C2): 旧实现所有路径硬编码为相对 CWD，从非仓库根目录启动
-    # (cron / Actions workdir 不同 / 手动 cd)时全部错位。
-    # 统一以脚本所在目录为基准解析，命令行调用方式不再影响输入输出位置。
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    URLS_FILE = os.path.join(BASE_DIR, "py/config/urls.txt")
+    # 修复(C2+回归): 路径不再依赖 CWD 也不依赖单脚本的 BASE_DIR 拼接，
+    # 由 CONFIG_DIR / LIB_DIR 自动探测(见文件头部注释)，兼容:
+    #   布局A: <根>/get_iptv.py + <根>/py/config + <根>/lib (本工作区)
+    #   布局B: <根>/py/get_iptv.py + <根>/py/config + <根>/lib (tvbox CI)
+    URLS_FILE = os.path.join(CONFIG_DIR, "urls.txt")
 
     # 1. 加载源
     TV_URLS = load_urls_from_file(URLS_FILE)
@@ -1052,17 +1086,17 @@ if __name__ == "__main__":
 
     # === 任务1: 主列表 ===
     _matched1, unmatched_tmpl1, _unmatched_src1 = process_iptv_task(
-        template_file=os.path.join(BASE_DIR, "py/config/iptv.txt"),
+        template_file=os.path.join(CONFIG_DIR, "iptv.txt"),
         tv_urls=TV_URLS,
-        output_m3u=os.path.join(BASE_DIR, "lib/iptv.m3u"),
-        output_txt=os.path.join(BASE_DIR, "lib/iptv.txt"),
-        report_file=os.path.join(BASE_DIR, "py/config/iptv.log"),
+        output_m3u=os.path.join(LIB_DIR, "iptv.m3u"),
+        output_txt=os.path.join(LIB_DIR, "iptv.txt"),
+        report_file=os.path.join(CONFIG_DIR, "iptv.log"),
         auto_clean=False,
         all_channels=ALL_CHANNELS,
     )
 
     # === 新增: 把任务1未匹配到的频道追加进测试列表模板，再执行任务2 ===
-    TEST_TEMPLATE_FILE = os.path.join(BASE_DIR, "py/config/iptv_test.txt")
+    TEST_TEMPLATE_FILE = os.path.join(CONFIG_DIR, "iptv_test.txt")
     if unmatched_tmpl1:
         append_unmatched_to_template(unmatched_tmpl1, TEST_TEMPLATE_FILE)
 
